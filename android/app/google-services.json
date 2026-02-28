@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "281402735455-painleffaqd6ac8qvu09kv390ug2ilmr.apps.googleusercontent.com",
+          "client_id": "281402735455-kr987e59frchire8s1o17d3g7kb87iai.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.example.fitcoach_",
-            "certificate_hash": "3967c7977687dfb1db25333e65c53ae52afd4ecf"
+            "certificate_hash": "db238788c9e82da445b4be4b698aac11feca94e6"
           }
         },
         {
