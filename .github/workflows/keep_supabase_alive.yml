@@ -1,0 +1,35 @@
+name: Keep Supabase Alive
+
+# Prevent the Supabase free-tier database from pausing due to inactivity
+# This workflow runs a simple query every Monday and Thursday
+
+on:
+  schedule:
+    # Runs at 9:00 AM UTC every Monday and Thursday
+    # Format: minute hour day_of_month month day_of_week
+    - cron: '0 9 * * 1,4'
+  
+  # Allow manual triggering from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  keep-supabase-alive:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Ping Supabase Database
+        run: |
+          # Make a GET request to your Supabase REST API
+          # This query fetches a single row from your table to keep the database active
+          curl -i \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/YOUR_TABLE_NAME?select=*&limit=1"
+      
+      - name: Log Success
+        if: success()
+        run: echo "✓ Supabase keep-alive ping completed successfully at $(date)"
+      
+      - name: Log Failure
+        if: failure()
+        run: echo "✗ Supabase keep-alive ping failed. Please check your credentials and table name."
