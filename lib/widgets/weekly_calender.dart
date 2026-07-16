@@ -1,7 +1,5 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class WeeklyCalendar extends StatefulWidget {
   final Function(String) onDaySelected;
@@ -18,6 +16,7 @@ class WeeklyCalendar extends StatefulWidget {
 }
 
 class _WeeklyCalendarState extends State<WeeklyCalendar> {
+  final _supabase = Supabase.instance.client;
   final List<String> _days = [
     "Monday",
     "Tuesday",
@@ -30,14 +29,14 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
   late String _selectedDay;
   Set<String> _activeDays = {};
 
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+
   @override
   void initState() {
     super.initState();
-    // 1. Initialize local state immediately
     _selectedDay = widget.initialDay;
     _fetchActiveDays();
 
-    // 2. THE FIX: Wait for the build to finish before notifying parent
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.initialDay.isNotEmpty) {
         widget.onDaySelected(widget.initialDay);
@@ -46,25 +45,29 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
   }
 
   void _fetchActiveDays() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
 
-    FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('routines')
-        .snapshots()
-        .listen((snapshot) {
-          final Set<String> newActive = {};
-          for (var doc in snapshot.docs) {
-            if (doc.data().containsKey('day')) {
-              newActive.add(doc['day']);
+    _supabase
+        .from('routines')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', user.id)
+        .listen(
+          (List<Map<String, dynamic>> data) {
+            final Set<String> newActive = {};
+            for (var routine in data) {
+              if (routine.containsKey('day') && routine['day'] != null) {
+                newActive.add(routine['day']);
+              }
             }
-          }
-          if (mounted) {
-            setState(() => _activeDays = newActive);
-          }
-        });
+            if (mounted) {
+              setState(() => _activeDays = newActive);
+            }
+          },
+          onError: (error) {
+            debugPrint("Calendar Stream Error: $error");
+          },
+        );
   }
 
   @override
@@ -72,7 +75,7 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
     return Container(
       height: 85,
       padding: const EdgeInsets.symmetric(vertical: 10),
-      color: const Color(0xFF0F0F10),
+      color: Colors.transparent,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: _days.length,
@@ -95,11 +98,23 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
               decoration: BoxDecoration(
                 color: isSelected
                     ? const Color(0xFF2F80ED)
-                    : const Color(0xFF1C1C1E),
+                    : Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(15),
                 border: isSelected
                     ? Border.all(color: const Color(0xFF56CCF2), width: 1)
-                    : Border.all(color: Colors.white10),
+                    : Border.all(
+                        color: isDark ? Colors.white10 : Colors.black12,
+                      ),
+                boxShadow: (isDark || isSelected)
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.15),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -107,7 +122,9 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
                   Text(
                     shortName,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.grey,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.grey : Colors.black87),
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                     ),
@@ -120,11 +137,17 @@ class _WeeklyCalendarState extends State<WeeklyCalendar> {
                       decoration: BoxDecoration(
                         color: isSelected
                             ? Colors.white
-                            : const Color(0xFFD0FD3E),
+                            : (isDark
+                                  ? const Color(0xFFD0FD3E)
+                                  : const Color(0xFF00A86B)),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFD0FD3E).withOpacity(0.6),
+                            color: isSelected
+                                ? Colors.white.withOpacity(0.5)
+                                : (isDark
+                                      ? const Color(0xFFD0FD3E).withOpacity(0.6)
+                                      : Colors.transparent),
                             blurRadius: 4,
                           ),
                         ],

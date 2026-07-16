@@ -3,14 +3,11 @@ import 'package:http/http.dart' as http;
 import '../models/exercise_model.dart';
 
 class ExerciseApiService {
-  // Free, Open Source, Static JSON file
   static const String _baseUrl =
       "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json";
 
-  // Cache
   static List<Exercise>? _cachedExercises;
 
-  // --- SMART MAPPING ---
   static final Map<String, List<String>> _synonyms = {
     "chest": ["chest", "pectorals", "pectoralis", "upper body"],
     "back": [
@@ -42,8 +39,6 @@ class ExerciseApiService {
     "cardio": ["cardio", "cardiovascular"],
   };
 
-  // --- THE "TIER S" RANKED LIST (Your Coach Brain) ---
-  // The AI scans this list FIRST.
   static final List<Exercise> _rankedExercises = [
     // --- 1. CHEST ---
     // Compound
@@ -447,7 +442,6 @@ class ExerciseApiService {
     ]),
   ];
 
-  // Helper to make the list cleaner
   static Exercise _ex(
     String id,
     String name,
@@ -456,7 +450,7 @@ class ExerciseApiService {
     List<String> instr,
   ) {
     return Exercise(
-      id: "ranked_$id", // Unique prefix so we know it's our gold data
+      id: "ranked_$id",
       name: name,
       bodyPart: body,
       target: target,
@@ -469,12 +463,11 @@ class ExerciseApiService {
           : name.toLowerCase().contains("bodyweight")
           ? "body weight"
           : "barbell",
-      gifUrl: "", // Use placeholders or add real URLs later
+      gifUrl: "",
       instructions: instr,
     );
   }
 
-  /// Fetch exercises with Ranked Injection
   static Future<List<Exercise>> fetchExercises({
     int limit = 50,
     int offset = 0,
@@ -510,7 +503,6 @@ class ExerciseApiService {
     }).toList();
   }
 
-  // --- INTERNAL LOADING LOGIC ---
   static Future<bool> _loadAllExercises() async {
     List<Exercise> fetchedList = [];
     try {
@@ -523,9 +515,6 @@ class ExerciseApiService {
       print("❌ Network Error (Using Local Backup): $e");
     }
 
-    // MERGE STRATEGY:
-    // 1. Put our _rankedExercises FIRST.
-    // 2. Add the API exercises after.
     _cachedExercises = [..._rankedExercises, ...fetchedList];
 
     print("✅ Loaded ${_cachedExercises!.length} exercises (Ranked First).");

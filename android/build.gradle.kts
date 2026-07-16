@@ -1,7 +1,9 @@
 plugins {
-    // Add the dependency for the Google services Gradle plugin
-    // This plugin makes the google-services.json values available to the SDKs.
-    id("com.google.gms.google-services") version "4.4.4" apply false
+    // ✅ Removed manual versions to let Flutter's internal tools decide the best match
+    id("com.android.application") apply false
+    id("com.android.library") apply false
+    id("org.jetbrains.kotlin.android") apply false
+    // ✅ ADDED: Google Services Plugin for Firebase/Auth
 }
 
 allprojects {

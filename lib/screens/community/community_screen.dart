@@ -1,7 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fitcoach_/screens/community/create_post_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
@@ -11,19 +10,26 @@ class CommunityScreen extends StatefulWidget {
 }
 
 class _CommunityScreenState extends State<CommunityScreen> {
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _neonBlue = const Color(0xFF2F80ED);
-  final Color _neonGreen = const Color(0xFFD0FD3E);
+  final _supabase = Supabase.instance.client;
+
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _neonYellow =>
+      isDark ? const Color(0xFFD0FD3E) : const Color(0xFF00A86B);
+
   final Color _purpleAccent = const Color(0xFFBB86FC);
+  final Color _neonGreen = const Color(0xFF00E676);
+  final Color _neonBlue = const Color(0xFF2F80ED);
 
-  String get _currentUserId => FirebaseAuth.instance.currentUser?.uid ?? "";
+  String get _currentUserId => _supabase.auth.currentUser?.id ?? "";
 
-  // Helper to format timestamps
-  String _timeAgo(Timestamp? timestamp) {
-    if (timestamp == null) return "Just now";
+  String _timeAgo(String? timestampStr) {
+    if (timestampStr == null) return "Just now";
+    final date = DateTime.parse(timestampStr);
     final now = DateTime.now();
-    final date = timestamp.toDate();
     final diff = now.difference(date);
 
     if (diff.inDays > 0) return "${diff.inDays}d ago";
@@ -32,37 +38,38 @@ class _CommunityScreenState extends State<CommunityScreen> {
     return "Just now";
   }
 
-  // Like Toggle Function
-  Future<void> _toggleLike(String postId, List currentLikes) async {
+  Future<void> _toggleLike(String postId, List<dynamic> currentLikes) async {
     if (_currentUserId.isEmpty) return;
 
-    final docRef = FirebaseFirestore.instance
-        .collection('community_posts')
-        .doc(postId);
+    List<String> newLikes = List<String>.from(currentLikes);
 
-    if (currentLikes.contains(_currentUserId)) {
-      // Unlike
-      await docRef.update({
-        'likes': FieldValue.arrayRemove([_currentUserId]),
-      });
+    if (newLikes.contains(_currentUserId)) {
+      newLikes.remove(_currentUserId);
     } else {
-      // Like
-      await docRef.update({
-        'likes': FieldValue.arrayUnion([_currentUserId]),
-      });
+      newLikes.add(_currentUserId);
+    }
+
+    try {
+      await _supabase
+          .from('community_posts')
+          .update({'likes': newLikes})
+          .eq('id', postId);
+    } catch (e) {
+      debugPrint("Error toggling like: $e");
     }
   }
 
-  // Delete Post Function
   Future<void> _deletePost(String postId) async {
-    await FirebaseFirestore.instance
-        .collection('community_posts')
-        .doc(postId)
-        .delete();
-    if (mounted)
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Post deleted")));
+    try {
+      await _supabase.from('community_posts').delete().eq('id', postId);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Post deleted")));
+      }
+    } catch (e) {
+      debugPrint("Error deleting post: $e");
+    }
   }
 
   @override
@@ -72,95 +79,95 @@ class _CommunityScreenState extends State<CommunityScreen> {
       appBar: AppBar(
         backgroundColor: _bgBlack,
         centerTitle: true,
-        title: const Text(
+        title: Text(
           "Community",
           style: TextStyle(
-            color: Colors.white,
+            color: _textWhite,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: _textWhite),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreatePostScreen()),
-          );
-        },
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CreatePostScreen()),
+        ),
         backgroundColor: _neonBlue,
         child: const Icon(Icons.edit, color: Colors.white),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('community_posts')
-            .orderBy('timestamp', descending: true)
-            .snapshots(),
+
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _supabase
+            .from('community_posts')
+            .stream(primaryKey: ['id'])
+            .order('timestamp', ascending: false),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(child: CircularProgressIndicator(color: _neonYellow));
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.people_outline,
-                    size: 80,
-                    color: Colors.grey.shade800,
-                  ),
-                  const SizedBox(height: 15),
-                  const Text(
-                    "It's quiet here...",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Text(
-                    "Be the first to share an update!",
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
+          final posts = snapshot.data ?? [];
+
+          if (posts.isEmpty) {
+            return _buildEmptyState();
           }
 
           return ListView.builder(
             padding: const EdgeInsets.only(top: 10, bottom: 80),
-            itemCount: snapshot.data!.docs.length,
-            itemBuilder: (context, index) {
-              var doc = snapshot.data!.docs[index];
-              return _buildPostCard(doc);
-            },
+            itemCount: posts.length,
+            itemBuilder: (context, index) => _buildPostCard(posts[index]),
           );
         },
       ),
     );
   }
 
-  Widget _buildPostCard(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    String postId = doc.id;
-    String userId = data['userId'] ?? "";
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.people_outline,
+            size: 80,
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+          ),
+          const SizedBox(height: 15),
+          Text(
+            "It's quiet here...",
+            style: TextStyle(
+              color: _textWhite,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            "Be the first to share an update!",
+            style: TextStyle(color: _textGrey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPostCard(Map<String, dynamic> data) {
+    String postId = data['id'].toString();
+    String userId = data['user_id'] ?? "";
     List likes = data['likes'] ?? [];
     bool isLiked = likes.contains(_currentUserId);
     int likeCount = likes.length;
 
-    // Fallback UI data
-    String avatarUrl = data['userAvatar'] ?? "";
+    String avatarUrl = data['user_avatar'] ?? "";
     String username = data['username'] ?? "User";
     String content = data['content'] ?? "";
-    String? activityType = data['activityType'];
-    String? activityName = data['activityName'];
-    String timeString = _timeAgo(data['timestamp'] as Timestamp?);
+    String? activityType = data['activity_type'];
+    String? activityName = data['activity_name'];
+    String timeString = _timeAgo(data['timestamp']);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
@@ -168,22 +175,26 @@ class _CommunityScreenState extends State<CommunityScreen> {
       decoration: BoxDecoration(
         color: _cardDark,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. User Header
           Row(
             children: [
               CircleAvatar(
                 radius: 20,
-                backgroundColor: Colors.grey.shade800,
+                backgroundColor: isDark
+                    ? Colors.grey.shade800
+                    : Colors.grey.shade300,
                 backgroundImage: avatarUrl.isNotEmpty
                     ? NetworkImage(avatarUrl)
                     : null,
                 child: avatarUrl.isEmpty
-                    ? const Icon(Icons.person, color: Colors.white)
+                    ? Icon(
+                        Icons.person,
+                        color: isDark ? Colors.white : Colors.black54,
+                      )
                     : null,
               ),
               const SizedBox(width: 15),
@@ -193,24 +204,23 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   children: [
                     Text(
                       username,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _textWhite,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
                     ),
                     Text(
                       timeString,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      style: TextStyle(color: _textGrey, fontSize: 12),
                     ),
                   ],
                 ),
               ),
-              if (userId ==
-                  _currentUserId) // Only show options if it's the current user's post
+              if (userId == _currentUserId)
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_horiz, color: Colors.grey),
-                  color: _bgBlack,
+                  icon: Icon(Icons.more_horiz, color: _textGrey),
+                  color: _cardDark,
                   onSelected: (val) {
                     if (val == 'delete') _deletePost(postId);
                   },
@@ -227,69 +237,16 @@ class _CommunityScreenState extends State<CommunityScreen> {
             ],
           ),
           const SizedBox(height: 15),
-
-          // 2. Post Content
           Text(
             content,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              height: 1.4,
-            ),
+            style: TextStyle(color: _textWhite, fontSize: 14, height: 1.4),
           ),
           const SizedBox(height: 15),
 
-          // 3. Activity Badge
           if (activityType != null && activityName != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: _getActivityColor(activityType).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: _getActivityColor(activityType).withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _getActivityIcon(activityType),
-                    color: _getActivityColor(activityType),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          activityType.toUpperCase(),
-                          style: TextStyle(
-                            color: _getActivityColor(activityType),
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          activityName,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildActivityBadge(activityType, activityName),
 
-          if (activityType != null && activityName != null)
-            const SizedBox(height: 15),
-          const Divider(color: Colors.white10),
-
-          // 4. Interaction Bar
+          Divider(color: isDark ? Colors.white10 : Colors.black12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -299,21 +256,65 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     onTap: () => _toggleLike(postId, likes),
                     child: _buildInteractionBtn(
                       icon: isLiked ? Icons.favorite : Icons.favorite_border,
-                      color: isLiked ? Colors.redAccent : Colors.grey,
+                      color: isLiked ? Colors.redAccent : _textGrey,
                       label: "$likeCount",
                     ),
                   ),
                   const SizedBox(width: 25),
                   _buildInteractionBtn(
                     icon: Icons.chat_bubble_outline,
-                    color: Colors.grey,
-                    label:
-                        "${data['commentsCount'] ?? 0}", // Placeholder for comments
+                    color: _textGrey,
+                    label: "${data['comments_count'] ?? 0}",
                   ),
                 ],
               ),
-              const Icon(Icons.share_outlined, color: Colors.grey, size: 20),
+              Icon(Icons.share_outlined, color: _textGrey, size: 20),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActivityBadge(String type, String name) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 15),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _getActivityColor(type).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _getActivityColor(type).withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _getActivityIcon(type),
+            color: _getActivityColor(type),
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  type.toUpperCase(),
+                  style: TextStyle(
+                    color: _getActivityColor(type),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  name,
+                  style: TextStyle(
+                    color: _textWhite,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -342,28 +343,16 @@ class _CommunityScreenState extends State<CommunityScreen> {
   }
 
   Color _getActivityColor(String type) {
-    switch (type) {
-      case "Workout":
-        return _neonGreen;
-      case "Meal":
-        return _purpleAccent;
-      case "Achievement":
-        return Colors.orangeAccent;
-      default:
-        return _neonBlue;
-    }
+    if (type == "Workout") return _neonGreen;
+    if (type == "Meal") return _purpleAccent;
+    if (type == "Achievement") return Colors.orangeAccent;
+    return _neonBlue;
   }
 
   IconData _getActivityIcon(String type) {
-    switch (type) {
-      case "Workout":
-        return Icons.fitness_center;
-      case "Meal":
-        return Icons.restaurant;
-      case "Achievement":
-        return Icons.emoji_events;
-      default:
-        return Icons.star;
-    }
+    if (type == "Workout") return Icons.fitness_center;
+    if (type == "Meal") return Icons.restaurant;
+    if (type == "Achievement") return Icons.emoji_events;
+    return Icons.star;
   }
 }

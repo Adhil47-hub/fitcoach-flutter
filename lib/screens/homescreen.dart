@@ -1,6 +1,9 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fitcoach_/services/ai_recommendation_service.dart';
 import 'package:fitcoach_/screens/community/community_screen.dart';
+import 'package:fitcoach_/screens/notifications_screen.dart';
 import 'package:fitcoach_/screens/profilescreen.dart';
 import 'package:fitcoach_/screens/workout/workout_menu_screen.dart';
 import 'package:fitcoach_/screens/workout/progress_screen.dart';
@@ -9,10 +12,15 @@ import 'package:fitcoach_/screens/activity/activity_details_screen.dart';
 import 'package:fitcoach_/screens/recommendations_screen.dart';
 import 'package:fitcoach_/screens/recommendation_detail_screen.dart';
 import 'package:fitcoach_/screens/workout/auto_workout_generator.dart';
-import 'package:fitcoach_/screens/article_screen.dart'; // ✅ Added the Article Screen import
+import 'package:fitcoach_/screens/article_screen.dart';
+import 'package:fitcoach_/screens/article_list_screen.dart';
+import 'package:fitcoach_/screens/search_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:health/health.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fitcoach_/services/notification_manager.dart';
+import 'package:intl/intl.dart';
 
 class Homescreen extends StatefulWidget {
   const Homescreen({super.key});
@@ -22,10 +30,16 @@ class Homescreen extends StatefulWidget {
 }
 
 class _HomescreenState extends State<Homescreen> {
-  int _selectedIndex = 0;
   final Health health = Health();
+  final _supabase = Supabase.instance.client;
 
-  // --- REAL-TIME TRACKING STATE ---
+  StreamSubscription<List<Map<String, dynamic>>>? _mealsSubscription;
+
+  bool _isInitialLoad = true;
+
+  List<Map<String, dynamic>> _aiRecommendations = [];
+  bool _isLoadingRecommendations = true;
+
   int _stepCount = 0;
   double _waterIntakeLiters = 0.0;
   int _caloriesEaten = 0;
@@ -34,23 +48,25 @@ class _HomescreenState extends State<Homescreen> {
   double _sleepHours = 0.0;
   int _streakDays = 0;
 
-  // --- USER CONFIGURABLE GOALS (WITH DEFAULTS) ---
   int _stepGoal = 10000;
   double _waterGoalLiters = 3.0;
   int _caloriesGoal = 2000;
   double _sleepGoal = 8.0;
 
-  // --- COLORS ---
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _purpleAccent = const Color(0xFFBB86FC);
-  final Color _neonYellow = const Color(0xFFD0FD3E);
-  final Color _neonGreen = const Color(0xFF00E676);
-  final Color _textWhite = Colors.white;
-  final Color _textGrey = Colors.grey;
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _neonYellow =>
+      isDark ? const Color(0xFFD0FD3E) : const Color(0xFF00A86B);
 
-  User? get _currentUser => FirebaseAuth.instance.currentUser;
-  String get _userName => _currentUser?.displayName?.split(' ')[0] ?? "User";
+  final Color _purpleAccent = const Color(0xFFBB86FC);
+  final Color _neonGreen = const Color(0xFF00E676);
+
+  User? get _currentUser => _supabase.auth.currentUser;
+  String get _userName =>
+      _currentUser?.userMetadata?['full_name']?.split(' ')[0] ?? "User";
 
   String get _todayKey {
     final now = DateTime.now();
@@ -61,9 +77,14 @@ class _HomescreenState extends State<Homescreen> {
   void initState() {
     super.initState();
     _setupSystemUI();
-    _fetchStepData();
-    _loadUserGoals(); // Fetch custom goals first
-    _loadRealTimeData();
+    _initializeDashboard();
+    _setupMealsStream();
+  }
+
+  @override
+  void dispose() {
+    _mealsSubscription?.cancel();
+    super.dispose();
   }
 
   void _setupSystemUI() {
@@ -78,69 +99,262 @@ class _HomescreenState extends State<Homescreen> {
     );
   }
 
-  // --- FETCH USER CUSTOM GOALS ---
+  void _setupMealsStream() {
+    if (_currentUser == null) return;
+
+    try {
+      _mealsSubscription = _supabase
+          .from('meals')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', _currentUser!.id)
+          .listen((allMeals) {
+            int totalCals = 0;
+            for (var meal in allMeals) {
+              if (meal['log_date'] == _todayKey || meal['date'] == _todayKey) {
+                totalCals += (meal['calories'] as num?)?.toInt() ?? 0;
+              }
+            }
+
+            if (mounted) {
+              setState(() {
+                _caloriesEaten = totalCals;
+              });
+              _syncRecommendationsWithState();
+            }
+          });
+    } catch (e) {
+      debugPrint("Meals Stream Error: $e");
+    }
+  }
+
+  Future<void> _initializeDashboard() async {
+    try {
+      await Future.wait([
+        _fetchStepData(),
+        _loadUserGoals(),
+        _loadRealTimeData(),
+      ]).timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint("Data Sync Error (Non-Fatal): $e");
+    }
+
+    if (mounted) {
+      setState(() {
+        _isInitialLoad = false;
+      });
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String cachedRecsStr = prefs.getString('ai_recs_$_todayKey') ?? '';
+
+      if (cachedRecsStr.isNotEmpty) {
+        final decodedRecs = List<Map<String, dynamic>>.from(
+          json.decode(cachedRecsStr),
+        );
+
+        if (decodedRecs.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _aiRecommendations = decodedRecs;
+              _isLoadingRecommendations = false;
+            });
+            _syncRecommendationsWithState();
+          }
+          return;
+        }
+      }
+
+      final aiRecs = await AiRecommendationService.getDynamicRecommendations(
+        userName: _userName,
+        goal: "General Fitness",
+        currentSteps: _stepCount,
+        stepGoal: _stepGoal,
+        currentWater: _waterIntakeLiters,
+        waterGoal: _waterGoalLiters,
+        currentSleep: _sleepHours,
+        sleepGoal: _sleepGoal,
+      );
+
+      if (aiRecs.isNotEmpty) {
+        final safeToSave = aiRecs.map((rec) {
+          final safeMap = Map<String, dynamic>.from(rec);
+          safeMap.remove('icon');
+          safeMap.remove('color');
+          return safeMap;
+        }).toList();
+
+        await prefs.setString('ai_recs_$_todayKey', json.encode(safeToSave));
+      }
+
+      if (mounted) {
+        setState(() {
+          _aiRecommendations = aiRecs;
+          _isLoadingRecommendations = false;
+        });
+        _syncRecommendationsWithState();
+      }
+    } catch (e) {
+      debugPrint("AI Generation Error: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingRecommendations = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadUserGoals() async {
     if (_currentUser == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .collection('goals')
-          .doc('daily')
-          .get();
-      if (doc.exists && mounted) {
-        final data = doc.data()!;
+      final response = await _supabase
+          .from('goals')
+          .select()
+          .eq('user_id', _currentUser!.id)
+          .maybeSingle();
+
+      if (response != null && mounted) {
         setState(() {
-          _stepGoal = (data['stepGoal'] ?? 10000).toInt();
-          _waterGoalLiters = (data['waterGoal'] ?? 3.0).toDouble();
-          _caloriesGoal = (data['caloriesGoal'] ?? 2000).toInt();
-          _sleepGoal = (data['sleepGoal'] ?? 8.0).toDouble();
+          _stepGoal = (response['step_goal'] as num?)?.toInt() ?? 10000;
+          _waterGoalLiters =
+              (response['water_goal'] as num?)?.toDouble() ?? 3.0;
+          _caloriesGoal = (response['calories_goal'] as num?)?.toInt() ?? 2000;
+          _sleepGoal = (response['sleep_goal'] as num?)?.toDouble() ?? 8.0;
         });
       }
     } catch (e) {
-      print("Error loading goals: $e");
+      debugPrint("Error loading goals: $e");
     }
   }
 
-  // --- FETCH ALL REAL DATA FROM FIREBASE ---
   Future<void> _loadRealTimeData() async {
     if (_currentUser == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_currentUser!.uid)
-          .collection('daily_logs')
-          .doc(_todayKey)
-          .get();
-      if (doc.exists && mounted) {
-        final data = doc.data()!;
+      final response = await _supabase
+          .from('daily_logs')
+          .select()
+          .eq('user_id', _currentUser!.id)
+          .eq('log_date', _todayKey)
+          .order('last_updated', ascending: false)
+          .limit(1);
+
+      if (response.isNotEmpty && mounted) {
+        final data = response.first;
         setState(() {
-          _waterIntakeLiters = (data['water'] ?? 0.0).toDouble();
-          _caloriesEaten = (data['calories'] ?? 0).toInt();
-          _isWorkoutDone = data['workoutDone'] ?? false;
-          _todaysWorkout = data['workoutName'] ?? "Rest Day";
-          _sleepHours = (data['sleep'] ?? 0.0).toDouble();
-          _streakDays = (data['streak'] ?? 0).toInt();
+          _waterIntakeLiters = (data['water'] as num?)?.toDouble() ?? 0.0;
+          _isWorkoutDone = data['workout_done'] == true;
+          _todaysWorkout = data['workout_name']?.toString() ?? "Rest Day";
+          _sleepHours = (data['sleep'] as num?)?.toDouble() ?? 0.0;
+          _streakDays = (data['streak'] as num?)?.toInt() ?? 0;
         });
       }
     } catch (e) {
-      print("Error loading realtime data: $e");
+      debugPrint("Error loading realtime data: $e");
     }
   }
 
-  // --- WATER LOGGING FUNCTIONALITY ---
+  Future<void> _syncRecommendationsWithState() async {
+    if (_aiRecommendations.isEmpty) return;
+
+    bool hasChanges = false;
+    for (var i = 0; i < _aiRecommendations.length; i++) {
+      final rec = _aiRecommendations[i];
+      final title = (rec['title'] ?? '').toString().toLowerCase();
+      final tag = (rec['tag'] ?? '').toString().toLowerCase();
+
+      // STRICTER MATCHING RULES:
+      if (tag.contains('water') ||
+          tag.contains('hydration') ||
+          tag.contains('daily goal') ||
+          title.contains('hydrat')) {
+        _aiRecommendations[i]['metric'] =
+            "${_waterIntakeLiters.toStringAsFixed(1)} / ${_waterGoalLiters.toStringAsFixed(1)} L";
+        hasChanges = true;
+      } else if (tag.contains('step') ||
+          tag.contains('activity') ||
+          title.contains('step')) {
+        _aiRecommendations[i]['metric'] = "$_stepCount / $_stepGoal steps";
+        hasChanges = true;
+      } else if (tag.contains('sleep') ||
+          tag.contains('recovery') ||
+          title.contains('bed')) {
+        _aiRecommendations[i]['metric'] =
+            "${_sleepHours.toStringAsFixed(1)} / ${_sleepGoal.toStringAsFixed(1)} hrs";
+        hasChanges = true;
+      } else if (tag.contains('fuel') || title.contains('calories')) {
+        _aiRecommendations[i]['metric'] =
+            "$_caloriesEaten / $_caloriesGoal Kcal";
+        hasChanges = true;
+      }
+      // HIDE THE METRIC FOR MINDSET, NUTRITION, ETC.
+      else {
+        if (_aiRecommendations[i]['metric'] != "") {
+          _aiRecommendations[i]['metric'] = "";
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges && mounted) {
+      setState(() {});
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final safeToSave = _aiRecommendations.map((rec) {
+          final safeMap = Map<String, dynamic>.from(rec);
+          safeMap.remove('icon');
+          safeMap.remove('color');
+          return safeMap;
+        }).toList();
+        await prefs.setString('ai_recs_$_todayKey', json.encode(safeToSave));
+      } catch (e) {
+        debugPrint("Error syncing cache: $e");
+      }
+    }
+  }
+
   Future<void> _addWater(double amount) async {
     if (_currentUser == null) return;
+
     setState(() => _waterIntakeLiters += amount);
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_currentUser!.uid)
-        .collection('daily_logs')
-        .doc(_todayKey)
-        .set({
+    _syncRecommendationsWithState();
+
+    try {
+      final existingLog = await _supabase
+          .from('daily_logs')
+          .select('id')
+          .eq('user_id', _currentUser!.id)
+          .eq('log_date', _todayKey)
+          .maybeSingle();
+
+      if (existingLog != null) {
+        await _supabase
+            .from('daily_logs')
+            .update({
+              'water': _waterIntakeLiters,
+              'last_updated': DateTime.now().toIso8601String(),
+            })
+            .eq('id', existingLog['id']);
+      } else {
+        await _supabase.from('daily_logs').insert({
+          'user_id': _currentUser!.id,
+          'log_date': _todayKey,
           'water': _waterIntakeLiters,
-          'lastUpdated': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+          'last_updated': DateTime.now().toIso8601String(),
+        });
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('waterReminders') ?? true) {
+        await NotificationManager.instance.checkWaterGoal(
+          _waterIntakeLiters,
+          _waterGoalLiters,
+        );
+      }
+    } catch (e) {
+      debugPrint("Error saving water: $e");
+    }
+
     if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -149,7 +363,6 @@ class _HomescreenState extends State<Homescreen> {
           content: Text(
             "💧 ${(amount * 1000).toInt()}ml logged! Total: ${_waterIntakeLiters.toStringAsFixed(2)}L",
           ),
-          duration: const Duration(seconds: 2),
           backgroundColor: Colors.blueAccent,
         ),
       );
@@ -169,10 +382,10 @@ class _HomescreenState extends State<Homescreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              Text(
                 "Log Water",
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textWhite,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -240,18 +453,14 @@ class _HomescreenState extends State<Homescreen> {
           const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
           ),
-          Text(sub, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(sub, style: TextStyle(color: _textGrey, fontSize: 12)),
         ],
       ),
     );
   }
 
-  // --- GOAL SETTING EDITOR ---
   void _showEditGoalsDialog() {
     final stepCtrl = TextEditingController(text: _stepGoal.toString());
     final waterCtrl = TextEditingController(text: _waterGoalLiters.toString());
@@ -276,10 +485,10 @@ class _HomescreenState extends State<Homescreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              Text(
                 "Set Daily Goals",
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textWhite,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -301,7 +510,7 @@ class _HomescreenState extends State<Homescreen> {
               ),
               _buildGoalInput(
                 "Calories (Kcal)",
-                "Based on your cut/bulk plan",
+                "Based on your plan",
                 calCtrl,
                 Icons.local_fire_department,
                 Colors.redAccent,
@@ -326,32 +535,23 @@ class _HomescreenState extends State<Homescreen> {
                   ),
                   onPressed: () async {
                     if (_currentUser != null) {
-                      final newSteps = int.tryParse(stepCtrl.text) ?? 10000;
-                      final newWater = double.tryParse(waterCtrl.text) ?? 3.0;
-                      final newCals = int.tryParse(calCtrl.text) ?? 2000;
-                      final newSleep = double.tryParse(sleepCtrl.text) ?? 8.0;
-
-                      // Save straight to Firebase!
-                      await FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(_currentUser!.uid)
-                          .collection('goals')
-                          .doc('daily')
-                          .set({
-                            'stepGoal': newSteps,
-                            'waterGoal': newWater,
-                            'caloriesGoal': newCals,
-                            'sleepGoal': newSleep,
-                          }, SetOptions(merge: true));
-
                       setState(() {
-                        _stepGoal = newSteps;
-                        _waterGoalLiters = newWater;
-                        _caloriesGoal = newCals;
-                        _sleepGoal = newSleep;
+                        _stepGoal = int.tryParse(stepCtrl.text) ?? 10000;
+                        _waterGoalLiters =
+                            double.tryParse(waterCtrl.text) ?? 3.0;
+                        _caloriesGoal = int.tryParse(calCtrl.text) ?? 2000;
+                        _sleepGoal = double.tryParse(sleepCtrl.text) ?? 8.0;
+                      });
+
+                      await _supabase.from('goals').upsert({
+                        'user_id': _currentUser!.id,
+                        'step_goal': _stepGoal,
+                        'water_goal': _waterGoalLiters,
+                        'calories_goal': _caloriesGoal,
+                        'sleep_goal': _sleepGoal,
                       });
                     }
-                    Navigator.pop(context);
+                    if (mounted) Navigator.pop(context);
                   },
                   child: const Text(
                     "Save Goals",
@@ -383,43 +583,74 @@ class _HomescreenState extends State<Homescreen> {
       child: TextField(
         controller: controller,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        style: const TextStyle(color: Colors.white),
+        style: TextStyle(color: _textWhite),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: Colors.grey),
+          labelStyle: TextStyle(color: _textGrey),
           helperText: suggestion,
           helperStyle: TextStyle(color: color.withOpacity(0.8), fontSize: 10),
           prefixIcon: Icon(icon, color: color),
           filled: true,
-          fillColor: Colors.black,
+          fillColor: isDark ? Colors.black : Colors.white,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
-            borderSide: BorderSide.none,
+            borderSide: BorderSide(
+              color: isDark ? Colors.transparent : Colors.grey.shade300,
+            ),
           ),
         ),
       ),
     );
   }
 
-  // --- HEALTH CONNECT (STEPS) ---
   Future<void> _fetchStepData() async {
     List<HealthDataType> types = [HealthDataType.STEPS];
-    bool hasPermissions = await health.hasPermissions(types) ?? false;
-    if (!hasPermissions)
-      hasPermissions = await health.requestAuthorization(types);
-    if (hasPermissions) {
-      final now = DateTime.now();
-      final midnight = DateTime(now.year, now.month, now.day);
-      int? steps = await health.getTotalStepsInInterval(midnight, now);
-      if (mounted) setState(() => _stepCount = steps ?? 0);
+    try {
+      bool hasPermissions = await health.hasPermissions(types) ?? false;
+      if (!hasPermissions) {
+        hasPermissions = await health.requestAuthorization(types);
+      }
+      if (hasPermissions) {
+        final now = DateTime.now();
+        final start = DateTime(now.year, now.month, now.day, 0, 0, 0);
+
+        int? steps = await health.getTotalStepsInInterval(start, now);
+
+        if (mounted) {
+          setState(() {
+            _stepCount = steps ?? 0;
+          });
+          _syncRecommendationsWithState();
+        }
+      }
+    } catch (e) {
+      debugPrint("Health Fetch Error: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isInitialLoad) {
+      return Scaffold(
+        backgroundColor: _bgBlack,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: _neonYellow),
+              const SizedBox(height: 20),
+              Text(
+                "Analyzing your progress...",
+                style: TextStyle(color: _textGrey, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: _bgBlack,
-      bottomNavigationBar: _buildBottomNavBar(),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
@@ -428,7 +659,6 @@ class _HomescreenState extends State<Homescreen> {
             children: [
               _buildHeader(),
               const SizedBox(height: 30),
-
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -440,7 +670,7 @@ class _HomescreenState extends State<Homescreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const WorkoutMenuScreen(),
+                        builder: (_) => const WorkoutMenuScreen(),
                       ),
                     ),
                   ),
@@ -451,7 +681,7 @@ class _HomescreenState extends State<Homescreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const NutritionScreen(),
+                        builder: (_) => const NutritionScreen(),
                       ),
                     ),
                   ),
@@ -461,9 +691,7 @@ class _HomescreenState extends State<Homescreen> {
                     _purpleAccent,
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => const ProgressScreen(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const ProgressScreen()),
                     ),
                   ),
                   _buildFeatureBtn(
@@ -473,19 +701,17 @@ class _HomescreenState extends State<Homescreen> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const CommunityScreen(),
+                        builder: (_) => const CommunityScreen(),
                       ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 30),
-
-              // --- DAILY ACTIVITY ---
               _buildSectionHeader(
                 "Today's Activity",
-                () {
-                  Navigator.push(
+                () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => ActivityDetailsScreen(
@@ -503,6 +729,8 @@ class _HomescreenState extends State<Homescreen> {
                       ),
                     ),
                   );
+                  await _loadRealTimeData();
+                  _syncRecommendationsWithState();
                 },
                 trailingIcon: Icons.edit_outlined,
                 onTrailingTap: _showEditGoalsDialog,
@@ -510,61 +738,29 @@ class _HomescreenState extends State<Homescreen> {
               const SizedBox(height: 15),
               _buildDailyActivityCards(),
               const SizedBox(height: 30),
-
-              // --- RECOMMENDATIONS (DYNAMICALLY PULLED FROM MASTER LIST) ---
               _buildSectionHeader("Recommendations", () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const RecommendationsScreen(),
+                    builder: (_) => RecommendationsScreen(
+                      recommendations: _aiRecommendations,
+                    ),
                   ),
                 );
               }),
               const SizedBox(height: 15),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: RecommendationData.getDailyRecommendations().map((
-                    rec,
-                  ) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 15),
-                      child: _buildRecommendationCard(
-                        rec["title"],
-                        rec["tag"],
-                        rec["metric"],
-                        rec["icon"],
-                        rec["color"],
-                        rec["imageUrl"],
-                        () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => RecommendationDetailScreen(
-                                title: rec["title"],
-                                tag: rec["tag"],
-                                metric: rec["metric"],
-                                icon: rec["icon"],
-                                color: rec["color"],
-                                imageUrl: rec["imageUrl"],
-                                description: rec["description"],
-                                buttonText: rec["buttonText"],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
+              _buildRecommendationList(),
               const SizedBox(height: 30),
-
               _buildWeeklyChallenge(),
               const SizedBox(height: 30),
-              _buildSectionHeader("Articles & Tips", () {}),
+              _buildSectionHeader("Articles & Tips", () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ArticleListScreen()),
+                );
+              }),
               const SizedBox(height: 15),
-              _buildArticleList(), // ✅ Updated List
+              _buildArticleList(),
               const SizedBox(height: 20),
             ],
           ),
@@ -573,17 +769,91 @@ class _HomescreenState extends State<Homescreen> {
     );
   }
 
-  // --- WIDGETS ---
-  Widget _buildDailyActivityCards() {
-    double stepProgress = (_stepCount / _stepGoal).clamp(0.0, 1.0);
-    double waterProgress = (_waterIntakeLiters / _waterGoalLiters).clamp(
-      0.0,
-      1.0,
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Hi, $_userName",
+              style: TextStyle(
+                color: _purpleAccent,
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              "It's Time To Challenge Your Limits.",
+              style: TextStyle(color: _textGrey, fontSize: 12),
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SearchScreen()),
+              ),
+              child: Icon(Icons.search, color: _textWhite, size: 26),
+            ),
+            const SizedBox(width: 15),
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              ),
+              child: Icon(
+                Icons.notifications_none,
+                color: _textWhite,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 15),
+            _buildProfileAvatar(),
+          ],
+        ),
+      ],
     );
-    double fuelProgress = _caloriesGoal > 0
-        ? (_caloriesEaten / _caloriesGoal).clamp(0.0, 1.0)
-        : 0;
+  }
 
+  Widget _buildProfileAvatar() {
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      ),
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _supabase
+            .from('users')
+            .stream(primaryKey: ['id'])
+            .eq('id', _currentUser?.id ?? ''),
+        builder: (context, snapshot) {
+          String? profileImageUrl;
+          if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+            profileImageUrl = snapshot.data!.first['user_avatar'];
+          }
+          profileImageUrl ??= _currentUser?.userMetadata?['avatar_url'];
+          return CircleAvatar(
+            radius: 18,
+            backgroundColor: _cardDark,
+            backgroundImage:
+                (profileImageUrl != null && profileImageUrl.isNotEmpty)
+                ? NetworkImage(profileImageUrl)
+                : null,
+            child: (profileImageUrl == null || profileImageUrl.isEmpty)
+                ? Icon(Icons.person, size: 20, color: _textGrey)
+                : null,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDailyActivityCards() {
     return Column(
       children: [
         Row(
@@ -595,7 +865,7 @@ class _HomescreenState extends State<Homescreen> {
                 "/ $_stepGoal",
                 Icons.directions_walk,
                 _neonYellow,
-                stepProgress,
+                (_stepCount / _stepGoal).clamp(0, 1),
                 onTap: _fetchStepData,
               ),
             ),
@@ -607,7 +877,9 @@ class _HomescreenState extends State<Homescreen> {
                 "/ ${_waterGoalLiters.toStringAsFixed(1)} L",
                 Icons.water_drop,
                 Colors.blueAccent,
-                waterProgress,
+                (_waterGoalLiters > 0)
+                    ? (_waterIntakeLiters / _waterGoalLiters).clamp(0, 1)
+                    : 0.0,
                 onTap: _showWaterOptionsDialog,
                 actionIcon: Icons.add_circle,
               ),
@@ -624,7 +896,9 @@ class _HomescreenState extends State<Homescreen> {
                 "/ $_caloriesGoal Kcal",
                 Icons.local_fire_department,
                 Colors.redAccent,
-                fuelProgress,
+                _caloriesGoal > 0
+                    ? (_caloriesEaten / _caloriesGoal).clamp(0, 1)
+                    : 0,
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const NutritionScreen()),
@@ -632,82 +906,82 @@ class _HomescreenState extends State<Homescreen> {
               ),
             ),
             const SizedBox(width: 15),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const WorkoutMenuScreen()),
+            Expanded(child: _buildWorkoutStatusCard()),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWorkoutStatusCard() {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const WorkoutMenuScreen()),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: _isWorkoutDone ? _neonGreen.withOpacity(0.1) : _cardDark,
+          borderRadius: BorderRadius.circular(20),
+          border: _isWorkoutDone
+              ? Border.all(color: _neonGreen.withOpacity(0.5))
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.fitness_center,
+                  color: _isWorkoutDone ? _neonGreen : _purpleAccent,
+                  size: 20,
                 ),
-                child: Container(
-                  padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(
-                    color: _isWorkoutDone
-                        ? _neonGreen.withOpacity(0.1)
-                        : _cardDark,
-                    borderRadius: BorderRadius.circular(20),
-                    border: _isWorkoutDone
-                        ? Border.all(color: _neonGreen.withOpacity(0.5))
-                        : null,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.fitness_center,
-                            color: _isWorkoutDone ? _neonGreen : _purpleAccent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            "Workout",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 15),
-                      Text(
-                        _isWorkoutDone ? "Crushed It!" : _todaysWorkout,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        _isWorkoutDone ? "Great job today." : "Not Started",
-                        style: TextStyle(
-                          color: _isWorkoutDone ? _neonGreen : Colors.grey,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _isWorkoutDone ? _neonGreen : Colors.white10,
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Icon(
-                          _isWorkoutDone ? Icons.check : Icons.play_arrow,
-                          color: _isWorkoutDone ? Colors.black : Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ],
+                const SizedBox(width: 8),
+                Text(
+                  "Workout",
+                  style: TextStyle(
+                    color: _textWhite,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 15),
+            Text(
+              _isWorkoutDone ? "Crushed It!" : _todaysWorkout,
+              style: TextStyle(
+                color: _textWhite,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              _isWorkoutDone ? "Great job today." : "Not Started",
+              style: TextStyle(
+                color: _isWorkoutDone ? _neonGreen : _textGrey,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              decoration: BoxDecoration(
+                color: _isWorkoutDone ? _neonGreen : Colors.black12,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Icon(
+                _isWorkoutDone ? Icons.check : Icons.play_arrow,
+                color: _isWorkoutDone ? Colors.black : _textWhite,
+                size: 16,
               ),
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 
@@ -741,8 +1015,8 @@ class _HomescreenState extends State<Homescreen> {
                     const SizedBox(width: 8),
                     Text(
                       title,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _textWhite,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -755,22 +1029,19 @@ class _HomescreenState extends State<Homescreen> {
             const SizedBox(height: 15),
             Text(
               mainVal,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: _textWhite,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            Text(
-              subVal,
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
+            Text(subVal, style: TextStyle(color: _textGrey, fontSize: 12)),
             const SizedBox(height: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(5),
               child: LinearProgressIndicator(
-                value: progress,
-                backgroundColor: Colors.white10,
+                value: progress.isNaN || progress.isInfinite ? 0.0 : progress,
+                backgroundColor: isDark ? Colors.white10 : Colors.grey.shade200,
                 color: color,
                 minHeight: 6,
               ),
@@ -781,11 +1052,60 @@ class _HomescreenState extends State<Homescreen> {
     );
   }
 
+  Widget _buildRecommendationList() {
+    if (_isLoadingRecommendations) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_aiRecommendations.isEmpty) return const SizedBox.shrink();
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: _aiRecommendations.map((rec) {
+          String cleanUrl = (rec["imageUrl"] ?? "")
+              .toString()
+              .replaceAll('[', '')
+              .replaceAll(']', '')
+              .trim();
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 15),
+            child: _buildRecommendationCard(
+              rec["title"] ?? "",
+              rec["tag"] ?? "",
+              rec["metric"] ?? "",
+              rec["icon"] ?? Icons.lightbulb,
+              rec["color"] ?? Colors.grey,
+              cleanUrl,
+              () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => RecommendationDetailScreen(
+                    title: rec["title"] ?? "",
+                    tag: rec["tag"] ?? "",
+                    metric: rec["metric"] ?? "",
+                    icon: rec["icon"] ?? Icons.lightbulb,
+                    color: rec["color"] ?? Colors.grey,
+                    imageUrl: cleanUrl,
+                    description: rec["description"] ?? "",
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildRecommendationCard(
     String title,
     String subtitle,
     String metric,
-    IconData fallbackIcon,
+    IconData icon,
     Color color,
     String imageUrl,
     VoidCallback onTap,
@@ -806,7 +1126,7 @@ class _HomescreenState extends State<Homescreen> {
               height: 120,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: Colors.grey.shade800,
+                color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(15),
               ),
               child: ClipRRect(
@@ -815,16 +1135,13 @@ class _HomescreenState extends State<Homescreen> {
                     ? Image.network(
                         imageUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            Icon(fallbackIcon, color: Colors.white24, size: 50),
-                      )
-                    : Center(
-                        child: Icon(
-                          fallbackIcon,
-                          color: Colors.white24,
+                        errorBuilder: (c, e, s) => Icon(
+                          icon,
+                          color: _textGrey.withOpacity(0.5),
                           size: 50,
                         ),
-                      ),
+                      )
+                    : Icon(icon, color: _textGrey.withOpacity(0.5), size: 50),
               ),
             ),
             const SizedBox(height: 12),
@@ -858,122 +1175,24 @@ class _HomescreenState extends State<Homescreen> {
                     ),
                   ),
                 ),
-                const Spacer(),
-                Icon(Icons.timer_outlined, color: _textGrey, size: 14),
-                const SizedBox(width: 4),
-                Text(metric, style: TextStyle(color: _textGrey, fontSize: 12)),
+                // ✅ HIDDEN IF EMPTY
+                if (metric.isNotEmpty) ...[
+                  const Spacer(),
+                  Icon(Icons.timer_outlined, color: _textGrey, size: 14),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      metric,
+                      style: TextStyle(color: _textGrey, fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ],
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildBottomNavBar() {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
-        color: _bgBlack,
-      ),
-      child: BottomNavigationBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: _purpleAccent,
-        unselectedItemColor: Colors.white54,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() => _selectedIndex = index);
-          switch (index) {
-            case 0:
-              break;
-            case 1:
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WorkoutMenuScreen()),
-              );
-              break;
-            case 2:
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProgressScreen()),
-              );
-              break;
-            case 3:
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              );
-              break;
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_filled, size: 28),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.calendar_month, size: 28),
-            label: 'Plan',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.analytics_outlined, size: 28),
-            label: 'Stats',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline, size: 28),
-            label: 'Profile',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Hi, $_userName",
-              style: TextStyle(
-                color: _purpleAccent,
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              "It's Time To Challenge Your Limits.",
-              style: TextStyle(color: _textGrey, fontSize: 12),
-            ),
-          ],
-        ),
-        Row(
-          children: [
-            Icon(Icons.search, color: _textWhite, size: 26),
-            const SizedBox(width: 15),
-            Icon(Icons.notifications_none, color: _textWhite, size: 26),
-            const SizedBox(width: 15),
-            InkWell(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              ),
-              child: const CircleAvatar(
-                radius: 16,
-                backgroundColor: Colors.grey,
-                child: Icon(Icons.person, size: 20, color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 
@@ -1057,53 +1276,36 @@ class _HomescreenState extends State<Homescreen> {
     );
   }
 
-  // --- DYNAMIC AI WEEKLY CHALLENGE BANNER ---
-  Widget _buildWeeklyChallenge() {
-    final now = DateTime.now();
-    final startOfYear = DateTime(now.year, 1, 1);
-    final weekOfYear = ((now.difference(startOfYear).inDays) / 7).ceil();
-
-    final List<Map<String, String>> aiChallenges = [
+  Map<String, String> get _currentWeeklyChallenge {
+    final List<Map<String, String>> challenges = [
       {
-        "title": "100-Rep Leg Crusher",
-        "desc": "High volume squats and lunges.",
-      },
-      {"title": "Spartan Core", "desc": "Intense 10-minute ab circuit."},
-      {
-        "title": "Upper Body Blast",
-        "desc": "Pushups, pullups, and shoulder scorchers.",
-      },
-      {
-        "title": "Plyometric Burn",
-        "desc": "Explosive jumps and cardio intensive.",
-      },
-      {
-        "title": "Goliath Back Day",
-        "desc": "Heavy rows and deadlift variations.",
+        "title": "Spartan Core",
+        "subtitle": "Intense 10-minute ab circuit.",
+        "image":
+            "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?q=80&w=1470&auto=format&fit=crop",
       },
     ];
+    return challenges[0];
+  }
 
-    final currentChallenge = aiChallenges[weekOfYear % aiChallenges.length];
+  Widget _buildWeeklyChallenge() {
+    final challenge = _currentWeeklyChallenge;
 
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                AutoWorkoutGenerator(routineName: currentChallenge["title"]!),
-          ),
-        );
-      },
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              AutoWorkoutGenerator(routineName: challenge["title"]!),
+        ),
+      ),
       child: Container(
         width: double.infinity,
         height: 140,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
           image: DecorationImage(
-            image: const NetworkImage(
-              "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?q=80&w=1470&auto=format&fit=crop",
-            ),
+            image: NetworkImage(challenge["image"]!),
             fit: BoxFit.cover,
             colorFilter: ColorFilter.mode(
               Colors.black.withOpacity(0.6),
@@ -1129,7 +1331,7 @@ class _HomescreenState extends State<Homescreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(
-                      "🔥 WEEKLY AI CHALLENGE",
+                      "🔥 WEEKLY CHALLENGE",
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 10,
@@ -1139,7 +1341,7 @@ class _HomescreenState extends State<Homescreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    currentChallenge["title"]!,
+                    challenge["title"]!,
                     style: TextStyle(
                       color: _neonYellow,
                       fontSize: 24,
@@ -1148,7 +1350,7 @@ class _HomescreenState extends State<Homescreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    currentChallenge["desc"]!,
+                    challenge["subtitle"]!,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,
@@ -1167,13 +1369,6 @@ class _HomescreenState extends State<Homescreen> {
                 decoration: BoxDecoration(
                   color: _neonYellow,
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: _neonYellow.withOpacity(0.4),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
                 ),
                 child: const Icon(
                   Icons.play_arrow,
@@ -1188,7 +1383,6 @@ class _HomescreenState extends State<Homescreen> {
     );
   }
 
-  // --- DYNAMIC ARTICLES & TIPS LIST ---
   Widget _buildArticleList() {
     final List<Map<String, dynamic>> articles = [
       {
@@ -1198,55 +1392,54 @@ class _HomescreenState extends State<Homescreen> {
         "color": _purpleAccent,
       },
       {
-        "title": "Optimal Recovery Protocols",
+        "title": "Recovery Protocols",
         "image":
             "https://images.unsplash.com/photo-1516481157630-05bc0aeb8b19?q=80&w=1470&auto=format&fit=crop",
         "color": Colors.blueAccent,
       },
       {
-        "title": "Macro Tracking Basics",
+        "title": "Nutrition Myths Busted",
         "image":
-            "https://images.unsplash.com/photo-1490645935967-10de6ba17061?q=80&w=1453&auto=format&fit=crop",
-        "color": Colors.redAccent,
+            "https://images.unsplash.com/photo-1490645935967-10de6ba17061?q=80&w=1470&auto=format&fit=crop",
+        "color": _neonYellow,
       },
     ];
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: articles
-            .map(
-              (article) => Padding(
-                padding: const EdgeInsets.only(right: 15),
-                child: _buildArticleCard(
-                  article["title"],
-                  article["image"],
-                  article["color"],
-                  () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ArticleScreen(
-                          title: article["title"],
-                          imageUrl: article["image"],
-                          color: article["color"],
-                        ),
-                      ),
-                    );
-                  },
+        children: articles.map((article) {
+          String cleanUrl = (article["image"] ?? "")
+              .toString()
+              .replaceAll('[', '')
+              .replaceAll(']', '')
+              .trim();
+          return Padding(
+            padding: const EdgeInsets.only(right: 15),
+            child: _buildArticleCard(
+              article["title"],
+              cleanUrl,
+              article["color"],
+              () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ArticleScreen(
+                    title: article["title"],
+                    imageUrl: cleanUrl,
+                    color: article["color"],
+                  ),
                 ),
               ),
-            )
-            .toList(),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  // --- UPGRADED ARTICLE CARD WIDGET ---
   Widget _buildArticleCard(
     String title,
     String imageUrl,
-    Color tagColor,
+    Color color,
     VoidCallback onTap,
   ) {
     return GestureDetector(
@@ -1265,7 +1458,7 @@ class _HomescreenState extends State<Homescreen> {
               height: 100,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: Colors.grey.shade800,
+                color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(15),
                 image: DecorationImage(
                   image: NetworkImage(imageUrl),
@@ -1288,7 +1481,7 @@ class _HomescreenState extends State<Homescreen> {
             Text(
               "Read Now",
               style: TextStyle(
-                color: tagColor,
+                color: color,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),

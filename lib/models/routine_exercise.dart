@@ -15,7 +15,7 @@ class RoutineExercise {
   final String name;
   final String bodyPart;
   List<WorkoutSet> sets;
-  String? supersetId; // For linking exercises together
+  String? supersetId;
 
   RoutineExercise({
     required this.id,
@@ -23,7 +23,7 @@ class RoutineExercise {
     required this.bodyPart,
     List<WorkoutSet>? sets,
     this.supersetId,
-  }) : sets = sets ?? [WorkoutSet()]; // Default to 1 empty set
+  }) : sets = sets ?? [WorkoutSet()];
 
   Map<String, dynamic> toMap() {
     return {

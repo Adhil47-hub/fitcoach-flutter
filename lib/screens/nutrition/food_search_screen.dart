@@ -1,29 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fitcoach_/screens/nutrition/food_detail_screen.dart'; // Import the detail screen
+import 'package:fitcoach_/screens/nutrition/food_detail_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:intl/intl.dart';
 import 'package:openfoodfacts/openfoodfacts.dart';
 
-// --- HELPER CLASS ---
 class FoodItem {
+  final String id;
   final String name;
-  final double calories; // Per 100g
-  final double protein; // Per 100g
-  final double carbs; // Per 100g
-  final double fat; // Per 100g
+  final double calories;
+  final double protein;
+  final double carbs;
+  final double fat;
   final String? imageUrl;
   final bool isAiGenerated;
-
-  // ✅ NEW: Dynamic Serving Data
-  final double standardServingWeight; // e.g., 182.0 (grams)
-  final String standardServingUnit; // e.g., "medium" or "slice"
+  final double standardServingWeight;
+  final String standardServingUnit;
 
   FoodItem({
+    this.id = '',
     required this.name,
     required this.calories,
     required this.protein,
@@ -31,12 +27,11 @@ class FoodItem {
     required this.fat,
     this.imageUrl,
     this.isAiGenerated = false,
-    this.standardServingWeight = 100.0, // Default if unknown
+    this.standardServingWeight = 100.0,
     this.standardServingUnit = "serving",
   });
 }
 
-// --- SSL FIX ---
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -55,15 +50,21 @@ class FoodSearchScreen extends StatefulWidget {
 
 class _FoodSearchScreenState extends State<FoodSearchScreen> {
   final TextEditingController _searchController = TextEditingController();
-  List<FoodItem> _searchResults = [];
-  bool _isLoading = false;
 
-  // ✅ YOUR WORKING KEY
-  final String _apiKey = 'AIzaSyCXF7tJQT9wjqXMhg2o1ZzONDP4ZxhjblA';
+  List<FoodItem> _aiResults = [];
+  List<FoodItem> _dbResults = [];
+  bool _isSearchingAi = false;
+  bool _isSearchingDb = false;
 
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _neonBlue = const Color(0xFF2F80ED);
+  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
+
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _dividerColor => isDark ? Colors.white10 : Colors.black12;
+
   final Color _aiPurple = const Color(0xFFBB86FC);
 
   @override
@@ -76,99 +77,87 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
     );
   }
 
-  Future<void> _searchFood(String query) async {
+  void _searchFood(String query) {
     if (query.isEmpty) return;
+    FocusScope.of(context).unfocus();
 
     setState(() {
-      _isLoading = true;
-      _searchResults = [];
+      _aiResults = [];
+      _dbResults = [];
+      _isSearchingAi = true;
+      _isSearchingDb = true;
     });
 
-    try {
-      final results = await Future.wait([
-        _fetchAiResult(query),
-        _fetchDatabaseResults(query),
-      ]);
-
-      List<FoodItem> combinedList = [];
-
-      if (results[0] != null) combinedList.addAll(results[0] as List<FoodItem>);
-      if (results[1] != null) combinedList.addAll(results[1] as List<FoodItem>);
-
-      if (mounted) {
-        setState(() => _searchResults = combinedList);
-        if (combinedList.isEmpty) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text("No results found.")));
-        }
-      }
-    } catch (e) {
-      print("Global Error: $e");
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    _fetchAiResult(query);
+    _fetchDatabaseResults(query);
   }
 
-  // --- TASK 1: AI SEARCH (Now asks for Serving Size) ---
-  Future<List<FoodItem>> _fetchAiResult(String query) async {
+  Future<void> _fetchAiResult(String query) async {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
         apiKey: _apiKey,
       );
 
-      // ✅ Updated Prompt to ask for specific weights
       final prompt =
           '''
-        Identify 3 to 5 common variations of "$query".
-        (e.g. for 'apple', return 'Fresh Apple', 'Dried Apple').
-        
-        For each, estimate nutrition per 100g.
-        CRITICAL: Also provide the "standard_weight" in grams for 1 typical unit (e.g. 1 medium apple = 182g, 1 slice bread = 30g).
-        
-        Return JSON ARRAY:
+        Act as a highly accurate nutrition database.
+        Identify 3 to 5 common variations of "$query" (e.g., Raw, Cooked, Brand name).
+        Return ONLY a raw JSON ARRAY. No conversational text.
+        Macros (calories, protein, carbs, fat) MUST be strictly based on 100 grams of the food.
+        Crucially, also provide a realistic standard serving unit (e.g., "egg", "slice", "cup", "piece") and its exact weight in grams.
         [
           { 
-            "name": "...", 
-            "calories": 0, "protein": 0, "carbs": 0, "fat": 0,
-            "serving_weight": 100, 
-            "serving_unit": "serving" 
+            "name": "Hard Boiled Egg", 
+            "calories": 155, 
+            "protein": 12.6, 
+            "carbs": 1.1, 
+            "fat": 10.6,
+            "serving_weight": 50, 
+            "serving_unit": "egg" 
           }
         ]
       ''';
 
       final response = await model.generateContent([Content.text(prompt)]);
 
-      if (response.text != null) {
-        String cleanJson = response.text!
-            .replaceAll('```json', '')
-            .replaceAll('```', '')
-            .trim();
-        List<dynamic> dataList = jsonDecode(cleanJson);
+      if (response.text != null && mounted) {
+        final String text = response.text!;
+        final int startIndex = text.indexOf('[');
+        final int endIndex = text.lastIndexOf(']');
 
-        return dataList.map((data) {
-          return FoodItem(
-            name: "✨ ${data['name']}",
-            calories: (data['calories'] as num).toDouble(),
-            protein: (data['protein'] as num).toDouble(),
-            carbs: (data['carbs'] as num).toDouble(),
-            fat: (data['fat'] as num).toDouble(),
-            standardServingWeight:
-                (data['serving_weight'] as num?)?.toDouble() ?? 100.0,
-            standardServingUnit: data['serving_unit'] ?? "serving",
-            isAiGenerated: true,
-          );
-        }).toList();
+        if (startIndex != -1 && endIndex != -1) {
+          final String cleanJson = text.substring(startIndex, endIndex + 1);
+          List<dynamic> dataList = jsonDecode(cleanJson);
+
+          final List<FoodItem> parsedItems = dataList.map<FoodItem>((data) {
+            return FoodItem(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              name: data['name'] ?? "Unknown",
+              calories: (data['calories'] as num).toDouble(),
+              protein: (data['protein'] as num).toDouble(),
+              carbs: (data['carbs'] as num).toDouble(),
+              fat: (data['fat'] as num).toDouble(),
+              standardServingWeight:
+                  (data['serving_weight'] as num?)?.toDouble() ?? 100.0,
+              standardServingUnit: data['serving_unit'] ?? "g",
+              isAiGenerated: true,
+            );
+          }).toList();
+
+          setState(() {
+            _aiResults = parsedItems;
+            _isSearchingAi = false;
+          });
+        }
       }
     } catch (e) {
-      print("AI Search Error: $e");
+      debugPrint("AI Search Error: $e");
+      if (mounted) setState(() => _isSearchingAi = false);
     }
-    return [];
   }
 
-  // --- TASK 2: DATABASE SEARCH (Now extracts Serving Size) ---
-  Future<List<FoodItem>> _fetchDatabaseResults(String query) async {
+  Future<void> _fetchDatabaseResults(String query) async {
     try {
       final configuration = ProductSearchQueryConfiguration(
         parametersList: <Parameter>[
@@ -184,10 +173,13 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
         configuration,
       ).timeout(const Duration(seconds: 8));
 
-      if (result.products != null) {
-        return result.products!
-            .map((p) {
+      if (result.products != null && mounted) {
+        final List<FoodItem> parsedDbItems = result.products!
+            .map<FoodItem>((p) {
               return FoodItem(
+                id:
+                    p.barcode ??
+                    DateTime.now().millisecondsSinceEpoch.toString(),
                 name: p.productName ?? "Unknown",
                 calories:
                     p.nutriments?.getValue(
@@ -214,20 +206,23 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
                     ) ??
                     0,
                 imageUrl: p.imageFrontUrl,
-                // ✅ Extract serving quantity if available (e.g. "40g")
                 standardServingWeight: p.servingQuantity ?? 100.0,
-                standardServingUnit:
-                    "serving", // Database items usually just say "1 serving"
+                standardServingUnit: "g",
                 isAiGenerated: false,
               );
             })
-            .where((item) => item.calories > 0)
+            .where((item) => item.calories > 0 && item.name != "Unknown")
             .toList();
+
+        setState(() {
+          _dbResults = parsedDbItems;
+          _isSearchingDb = false;
+        });
       }
     } catch (e) {
-      print("Database Error: $e");
+      debugPrint("DB Search Error: $e");
+      if (mounted) setState(() => _isSearchingDb = false);
     }
-    return [];
   }
 
   @override
@@ -236,98 +231,165 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
       backgroundColor: _bgBlack,
       appBar: AppBar(
         backgroundColor: _bgBlack,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: _textWhite),
+        elevation: 0,
         title: TextField(
           controller: _searchController,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: _textWhite),
           autofocus: true,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: "Search food...",
-            hintStyle: TextStyle(color: Colors.grey),
+            hintStyle: TextStyle(color: _textGrey),
             border: InputBorder.none,
           ),
           onSubmitted: _searchFood,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
+            icon: Icon(Icons.search, color: _textWhite),
             onPressed: () => _searchFood(_searchController.text),
           ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: _neonBlue))
-          : _searchResults.isEmpty
-          ? const Center(
+      body:
+          _aiResults.isEmpty &&
+              _dbResults.isEmpty &&
+              !_isSearchingAi &&
+              !_isSearchingDb
+          ? Center(
               child: Text(
                 "Search for any food.",
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(color: _textGrey),
               ),
             )
-          : ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: _searchResults.length,
-              separatorBuilder: (_, __) => const Divider(color: Colors.white10),
-              itemBuilder: (context, index) {
-                final item = _searchResults[index];
-                bool isTopPick = item.isAiGenerated;
-
-                return Container(
-                  decoration: isTopPick
-                      ? BoxDecoration(
-                          color: _aiPurple.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(15),
-                          border: Border.all(color: _aiPurple.withOpacity(0.3)),
-                        )
-                      : null,
-                  margin: isTopPick
-                      ? const EdgeInsets.only(bottom: 10)
-                      : EdgeInsets.zero,
-                  child: ListTile(
-                    contentPadding: isTopPick
-                        ? const EdgeInsets.all(10)
-                        : EdgeInsets.zero,
-                    leading: item.imageUrl != null
-                        ? Image.network(
-                            item.imageUrl!,
-                            width: 50,
-                            height: 50,
-                            errorBuilder: (_, __, ___) =>
-                                const Icon(Icons.fastfood, color: Colors.grey),
-                          )
-                        : Icon(
-                            item.isAiGenerated
-                                ? Icons.auto_awesome
-                                : Icons.fastfood,
-                            color: item.isAiGenerated ? _aiPurple : Colors.grey,
-                          ),
-                    title: Text(
-                      item.name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+          : CustomScrollView(
+              slivers: [
+                if (_isSearchingAi || _aiResults.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        left: 20,
+                        top: 20,
+                        bottom: 10,
+                      ),
+                      child: Text(
+                        "AI Estimates",
+                        style: TextStyle(
+                          color: _aiPurple,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                    subtitle: Text(
-                      "${item.calories.toInt()} kcal • ${item.protein.toInt()}p • ${item.carbs.toInt()}c • ${item.fat.toInt()}f",
-                      style: const TextStyle(color: Colors.grey, fontSize: 13),
-                    ),
-                    trailing: const Icon(
-                      Icons.add_circle_outline,
-                      color: Colors.white,
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => FoodDetailScreen(food: item),
-                        ),
-                      );
-                    },
                   ),
-                );
-              },
+                if (_isSearchingAi)
+                  SliverToBoxAdapter(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: CircularProgressIndicator(color: _aiPurple),
+                      ),
+                    ),
+                  ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) =>
+                        _buildFoodCard(_aiResults[index], isTopPick: true),
+                    childCount: _aiResults.length,
+                  ),
+                ),
+                if (_isSearchingDb || _dbResults.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                        left: 20,
+                        top: 30,
+                        bottom: 10,
+                      ),
+                      child: Text(
+                        "Database Verified",
+                        style: TextStyle(
+                          color: _textGrey,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_isSearchingDb)
+                  const SliverToBoxAdapter(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: CircularProgressIndicator(color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) =>
+                        _buildFoodCard(_dbResults[index], isTopPick: false),
+                    childCount: _dbResults.length,
+                  ),
+                ),
+              ],
             ),
+    );
+  }
+
+  Widget _buildFoodCard(FoodItem item, {required bool isTopPick}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      decoration: BoxDecoration(
+        color: _cardDark,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
+          color: isTopPick ? _aiPurple.withOpacity(0.3) : _dividerColor,
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+        leading: item.imageUrl != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  item.imageUrl!,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      Icon(Icons.fastfood, color: _textGrey),
+                ),
+              )
+            : Icon(
+                isTopPick ? Icons.auto_awesome : Icons.local_dining,
+                color: isTopPick ? _aiPurple : _textGrey,
+              ),
+        title: Text(
+          item.name,
+          style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          "${item.calories.toInt()} kcal • ${item.protein.toInt()}p • ${item.carbs.toInt()}c • ${item.fat.toInt()}f",
+          style: TextStyle(color: _textGrey, fontSize: 13),
+        ),
+        trailing: Icon(Icons.add_circle_outline, color: _textWhite),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FoodDetailScreen(food: item),
+            ),
+          );
+        },
+      ),
     );
   }
 }

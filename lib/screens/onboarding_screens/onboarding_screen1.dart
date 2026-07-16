@@ -46,8 +46,6 @@ class _OnboardingScreen1State extends State<OnboardingScreen1> {
               ),
             ),
             const SizedBox(height: 30),
-            
-            // Description Box
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
               color: const Color(0xFFB19FF4),
@@ -63,10 +61,7 @@ class _OnboardingScreen1State extends State<OnboardingScreen1> {
                 ),
               ),
             ),
-
             const Spacer(),
-
-            // Gender Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -74,10 +69,7 @@ class _OnboardingScreen1State extends State<OnboardingScreen1> {
                 _buildGenderButton("Female", Icons.female, "Female"),
               ],
             ),
-
             const Spacer(),
-
-            // Continue Button
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
               child: SizedBox(

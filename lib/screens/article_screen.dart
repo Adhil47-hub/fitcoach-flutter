@@ -13,74 +13,87 @@ class ArticleScreen extends StatelessWidget {
   });
 
   String _getArticleBody() {
-    if (title.contains("Barbell")) {
-      return """Mastering the barbell is the foundation of any serious strength or hypertrophy program. But lifting heavy with poor mechanics is a one-way ticket to Snap City. 
+    if (title.contains("Squat") || title.contains("Barbell")) {
+      return """The barbell back squat is the king of all leg exercises, but it is highly technical. A bad squat will wreck your knees and lower back.
 
-1. The Setup is Everything
-Before you even unrack the weight, your body needs to be tight. Plant your feet firmly into the floor, squeeze your glutes, and brace your core as if you are about to take a punch to the stomach. 
+1. Foot Placement
+There is no 'perfect' stance width. It depends on your hip anatomy. Generally, point your toes out about 15-30 degrees and stand shoulder-width apart.
 
-2. Lat Engagement
-A common mistake on the bench press and squat is leaving the lats "loose." Imagine bending the bar in half like a horseshoe. This external rotation locks your lats in place, providing a massive, stable shelf for the weight.
+2. Bracing (The Valsalva Maneuver)
+Before you descend, take a massive breath into your belly—not your chest. Flex your abs as if you are about to get punched. This creates a pressurized cylinder that protects your spine.
 
-3. Bar Path
-The bar should not travel in a perfectly straight up-and-down line during a bench press. It should touch lower on your sternum and press up slightly backward toward your collarbone in a slight "J" curve.
+3. Depth
+Aim for at least parallel (where your hip crease drops slightly below the top of your knee). If you can't hit depth without your heels coming off the floor, work on your ankle mobility.
 
 Keep the weight manageable, prioritize the contraction, and let your muscles (not your ego) do the lifting!""";
     } else if (title.contains("Supplement")) {
-      return """Supplements are meant to do exactly that: supplement a solid diet and training program. They aren't magic, but the right ones can give you an edge.
+      return """Supplements are exactly that—supplementary. They are meant to add to a solid foundation of whole foods and consistent training. Here are the big three that actually work:
 
 1. Whey Protein
-Convenient, fast-absorbing, and highly bioavailable. Perfect for hitting your daily protein targets, especially post-workout when your muscles are primed for nutrient uptake.
+Protein is the building block of muscle. Whey is fast-absorbing, making it perfect for post-workout recovery. Aim for 1.6-2.2g of protein per kg of body weight daily.
 
 2. Creatine Monohydrate
-The most researched supplement on earth. It helps your muscles produce energy during heavy lifting, leading to increased strength and muscle mass over time. 3-5g a day is all you need.
+The most researched supplement on earth. It helps your muscles produce energy during heavy lifting or high-intensity exercise. 5 grams a day is all you need. No loading phase required.
 
-3. Pre-Workout (Caffeine)
-Great for days when you're low on energy, but beware of building a tolerance. Cycle off it every few weeks to maintain its effectiveness and let your adrenal system reset.
-
-4. Omega-3 & Vitamin D
-Crucial for joint health, hormone production, and overall recovery. If you aren't getting enough sun or eating fatty fish, these are non-negotiable for a healthy foundation.""";
+3. Caffeine / Pre-Workout
+A simple cup of coffee or a pre-workout supplement can significantly reduce your perceived exertion, meaning you can push harder for longer. Just avoid it within 6 hours of bedtime.""";
     } else if (title.contains("Recovery")) {
-      return """You don't grow in the gym; you grow when you recover. If you are training hard but ignoring recovery, you are leaving gains on the table.
+      return """You don't build muscle while you lift; you build muscle while you recover. If you are training hard 5 days a week, your recovery protocol needs to be just as intense.
 
-1. Sleep is King
-Aim for 7-9 hours of quality sleep. This is when your body releases human growth hormone (HGH) and repairs tissue. No supplement routine can outwork a bad sleep schedule.
+1. Active Recovery
+Don't just sit on the couch on your rest days. Go for a 30-minute walk, do some light yoga, or go for an easy bike ride. Blood flow delivers nutrients to torn muscle fibers.
 
-2. Active Recovery
-On rest days, don't just sit on the couch. Light walks, mobility work, or easy cycling promotes blood flow to damaged muscles, accelerating the repair process by flushing out metabolic waste.
+2. Hydration
+Muscle is 70% water. If you are dehydrated, your recovery slows to a crawl. Aim for at least 3-4 liters of water a day, especially if you are sweating heavily.
 
-3. Hydration & Electrolytes
-A 2% drop in hydration can lead to a 10% drop in performance. Drink water consistently and ensure you're getting enough sodium, potassium, and magnesium, especially if you sweat heavily.
+3. Heat and Cold Exposure
+While ice baths are trendy, they can actually blunt muscle hypertrophy if done immediately after lifting. Save the cold plunges for rest days or cardio days, and use the sauna post-lift to increase blood flow.""";
+    } else if (title.contains("Nutrition")) {
+      return """The fitness industry is full of terrible nutrition advice. Let's clear up some of the most common myths holding you back.
 
-Listen to your body. If you're consistently sore, weak, or unmotivated, it's time to take a deload week.""";
-    } else if (title.contains("Macro")) {
-      return """Tracking macronutrients (macros) is the most precise way to ensure you are eating aligned with your goals—whether that's losing fat, building muscle, or maintaining.
+Myth 1: Eating carbs at night makes you fat.
+Truth: Your body doesn't have a clock that suddenly turns carbs into fat after 8 PM. Weight gain is dictated by total daily calorie intake, not meal timing.
 
-1. Protein (4 calories per gram)
-The building block of muscle. Aim for 1.6 to 2.2 grams per kilogram of body weight. Essential for muscle repair and retention during a cutting phase.
+Myth 2: You can only absorb 30g of protein per meal.
+Truth: Your body will digest and utilize larger amounts of protein; the digestion process just takes longer. While spreading protein out is optimal for muscle protein synthesis, total daily intake matters far more.
 
-2. Fats (9 calories per gram)
-Crucial for hormone regulation (including testosterone). Don't drop these too low! Avocados, nuts, whole eggs, and olive oil are excellent sources.
+Myth 3: Eating fat makes you fat.
+Truth: Dietary fat is essential for hormone production (including testosterone). Eating a caloric surplus makes you fat. Avocados, nuts, and olive oil are your friends.""";
+    } else if (title.contains("Sleep")) {
+      return """You can have the perfect diet and the perfect workout plan, but if your sleep is garbage, your results will be too.
 
-3. Carbohydrates (4 calories per gram)
-Your body's preferred energy source. Time your carbs around your workouts to fuel performance and aid recovery.
+1. The Hormonal Cascade
+During deep (Slow-Wave) sleep, your body releases the majority of its Human Growth Hormone (HGH). If you consistently get less than 7 hours of sleep, your testosterone drops and cortisol (stress hormone) spikes, telling your body to store fat and break down muscle.
 
-How to start: Buy a simple digital food scale, download a tracking app, and log everything for one week just to see your baseline. It's an incredibly eye-opening experience!""";
+2. Sleep Hygiene
+• Keep your room freezing cold (around 65°F / 18°C).
+• Black out your windows completely.
+• Stop looking at your phone 45 minutes before bed; the blue light destroys your natural melatonin production.
+
+Treat your sleep with the same discipline as your workouts.""";
     }
 
-    // Fallback for any future articles we add without updating this switch
     return "This is a premium FitCoach AI article. Stay tuned for more daily fitness insights, science-based recovery protocols, and nutritional deep dives generated specifically for your goals.";
   }
 
   @override
   Widget build(BuildContext context) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color _bgBlack = Theme.of(context).scaffoldBackgroundColor;
+    Color _textWhite = isDark ? Colors.white : Colors.black;
+    Color _textGrey = isDark ? Colors.grey : Colors.black54;
+
+    Color tagTextColor = (color == const Color(0xFFD0FD3E) && !isDark)
+        ? const Color(0xFF00A86B)
+        : color;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: _bgBlack,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 300,
-            backgroundColor: Colors.black,
+            backgroundColor: _bgBlack,
             pinned: true,
             leading: IconButton(
               icon: Container(
@@ -109,8 +122,8 @@ How to start: Buy a simple digital food scale, download a tracking app, and log 
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          Colors.black.withOpacity(0.8),
-                          Colors.black,
+                          _bgBlack.withOpacity(0.8),
+                          _bgBlack,
                         ],
                         stops: const [0.5, 0.9, 1.0],
                       ),
@@ -138,7 +151,7 @@ How to start: Buy a simple digital food scale, download a tracking app, and log 
                     child: Text(
                       "FITCOACH AI TIP",
                       style: TextStyle(
-                        color: color,
+                        color: tagTextColor,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
@@ -147,19 +160,19 @@ How to start: Buy a simple digital food scale, download a tracking app, and log 
                   const SizedBox(height: 15),
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: _textWhite,
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Divider(color: Colors.white24),
+                  Divider(color: isDark ? Colors.white24 : Colors.black12),
                   const SizedBox(height: 20),
                   Text(
                     _getArticleBody(),
-                    style: const TextStyle(
-                      color: Colors.grey,
+                    style: TextStyle(
+                      color: _textGrey,
                       fontSize: 16,
                       height: 1.8,
                     ),

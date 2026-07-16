@@ -13,21 +13,17 @@ class ExerciseListScreen extends StatefulWidget {
 }
 
 class _ExerciseListScreenState extends State<ExerciseListScreen> {
-  // Data
   List<Exercise> _exercises = [];
   bool _isLoading = true;
   String _errorMessage = "";
   int _currentOffset = 0;
 
-  // Selection
   final Set<String> _selectedIds = {};
   final List<Exercise> _selectedExercises = [];
 
-  // Filters
   String _selectedCategory = "all";
   Timer? _debounce;
 
-  // SIMPLIFIED CATEGORIES (The Service handles the "Chest" -> "Pectorals" mapping now)
   final Map<String, String> _categories = {
     "All": "all",
     "Chest": "chest",
@@ -39,9 +35,13 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
     "Cardio": "cardio",
   };
 
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _neonYellow = const Color(0xFFD0FD3E);
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _neonYellow =>
+      isDark ? const Color(0xFFD0FD3E) : const Color(0xFF00A86B);
 
   @override
   void initState() {
@@ -69,7 +69,6 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
           offset: _currentOffset,
         );
       } else {
-        // Fetch specific category using the new Smart Search
         results = await ExerciseApiService.fetchByBodyPart(_selectedCategory);
       }
 
@@ -81,7 +80,7 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
             _exercises.addAll(results);
           }
           if (_selectedCategory == "all") {
-             _currentOffset += 50;
+            _currentOffset += 50;
           }
           _isLoading = false;
         });
@@ -92,7 +91,6 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
           _isLoading = false;
           _errorMessage = "Failed to load. Check connection.";
         });
-        print("API Error: $e"); 
       }
     }
   }
@@ -135,13 +133,11 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
       backgroundColor: _bgBlack,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
+        elevation: 0,
+        iconTheme: IconThemeData(color: _textWhite),
+        title: Text(
           "Select Exercises",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
         ),
       ),
       floatingActionButton: _selectedExercises.isNotEmpty
@@ -160,27 +156,32 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
           : null,
       body: Column(
         children: [
-          // Search
           Padding(
             padding: const EdgeInsets.all(20),
             child: TextField(
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: _textWhite),
               onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: "Search (e.g., Bench Press)...",
-                hintStyle: const TextStyle(color: Colors.grey),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                hintStyle: TextStyle(color: _textGrey),
+                prefixIcon: Icon(Icons.search, color: _textGrey),
                 filled: true,
                 fillColor: _cardDark,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide.none,
+                  borderSide: isDark
+                      ? BorderSide.none
+                      : BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: isDark
+                      ? BorderSide.none
+                      : BorderSide(color: Colors.grey.shade300),
                 ),
               ),
             ),
           ),
-
-          // Categories
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -202,14 +203,16 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
                       decoration: BoxDecoration(
                         color: isSelected ? _neonYellow : _cardDark,
                         borderRadius: BorderRadius.circular(20),
-                        border: isSelected
-                            ? null
-                            : Border.all(color: Colors.white12),
+                        border: Border.all(
+                          color: isSelected
+                              ? Colors.transparent
+                              : (isDark ? Colors.white12 : Colors.black12),
+                        ),
                       ),
                       child: Text(
                         entry.key,
                         style: TextStyle(
-                          color: isSelected ? Colors.black : Colors.white,
+                          color: isSelected ? Colors.black : _textWhite,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -220,8 +223,6 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
             ),
           ),
           const SizedBox(height: 10),
-
-          // List
           Expanded(
             child: _errorMessage.isNotEmpty
                 ? Center(
@@ -240,16 +241,17 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
                     ),
                   )
                 : _exercises.isEmpty && !_isLoading
-                ? const Center(
+                ? Center(
                     child: Text(
                       "No exercises found",
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: _textGrey),
                     ),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    // Add "Load More" button only for "All" tab
-                    itemCount: _exercises.length + (_selectedCategory == "all" ? 1 : 0),
+                    itemCount:
+                        _exercises.length +
+                        (_selectedCategory == "all" ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index == _exercises.length) {
                         return Padding(
@@ -261,6 +263,9 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: _cardDark,
                                     foregroundColor: _neonYellow,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                   ),
                                   child: const Text("Load More Exercises"),
                                 ),
@@ -280,7 +285,7 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
 
   Widget _buildExerciseTile(Exercise exercise, bool isSelected) {
     bool hasUrl = exercise.gifUrl.isNotEmpty;
-    
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -298,7 +303,19 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
         decoration: BoxDecoration(
           color: isSelected ? _neonYellow.withOpacity(0.1) : _cardDark,
           borderRadius: BorderRadius.circular(15),
-          border: isSelected ? Border.all(color: _neonYellow, width: 2) : null,
+          border: isSelected
+              ? Border.all(color: _neonYellow, width: 2)
+              : Border.all(color: isDark ? Colors.transparent : Colors.black12),
+          boxShadow: isDark
+              ? []
+              : [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 5,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         child: ListTile(
           contentPadding: const EdgeInsets.all(10),
@@ -306,13 +323,13 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
             width: 60,
             height: 60,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: isDark ? Colors.white12 : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(10),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: !hasUrl
-                  ? const Center(child: Icon(Icons.fitness_center, color: Colors.grey, size: 30))
+                  ? Icon(Icons.fitness_center, color: _textGrey, size: 30)
                   : CachedNetworkImage(
                       imageUrl: exercise.gifUrl,
                       fit: BoxFit.cover,
@@ -321,26 +338,26 @@ class _ExerciseListScreenState extends State<ExerciseListScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                       errorWidget: (context, url, error) =>
-                          const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+                          Icon(Icons.broken_image, color: _textGrey),
                     ),
             ),
           ),
           title: Text(
             exercise.name,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: _textWhite,
               fontWeight: FontWeight.bold,
               fontSize: 16,
             ),
           ),
           subtitle: Text(
             "${exercise.bodyPart} • ${exercise.target}",
-            style: const TextStyle(color: Colors.grey, fontSize: 13),
+            style: TextStyle(color: _textGrey, fontSize: 13),
           ),
           trailing: IconButton(
             icon: Icon(
               isSelected ? Icons.check_circle : Icons.add_circle,
-              color: isSelected ? _neonYellow : Colors.white,
+              color: isSelected ? _neonYellow : _textGrey,
             ),
             onPressed: () => _toggleSelection(exercise),
           ),

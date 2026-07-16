@@ -1,280 +1,156 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fitcoach_/services/theme_manager.dart';
 
 class EditProfileScreen extends StatefulWidget {
-  final Map<String, dynamic> currentData;
-
-  const EditProfileScreen({super.key, required this.currentData});
+  const EditProfileScreen({super.key});
 
   @override
   State<EditProfileScreen> createState() => _EditProfileScreenState();
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  // Controllers
+  final _supabase = Supabase.instance.client;
+  final _formKey = GlobalKey<FormState>();
+
   late TextEditingController _nameController;
-  late TextEditingController _weightController;
-  late TextEditingController _heightController;
-  late TextEditingController _ageController;
-
-  // Dropdown Values (AI Sync Fields)
-  String _selectedGoal = "Build Muscle";
-  String _selectedLevel = "Intermediate";
-  String _selectedEquipment = "Gym (Full)";
-  String _selectedGender = "Male";
-  String _selectedActivity = "Active";
-
-  // Options Lists
-  final List<String> _goals = [
-    "Build Muscle",
-    "Lose Weight",
-    "Increase Strength",
-  ];
-  final List<String> _levels = ["Beginner", "Intermediate", "Pro"];
-  final List<String> _equipmentOptions = [
-    "Gym (Full)",
-    "Home (Dumbbells)",
-    "Bodyweight Only",
-  ];
-  final List<String> _genders = ["Male", "Female", "Other"];
-  final List<String> _activities = [
-    "Sedentary",
-    "Lightly Active",
-    "Active",
-    "Very Active",
-  ];
-
+  late TextEditingController _phoneController;
   bool _isLoading = false;
+  bool _isInitialLoading = true;
 
-  // Colors
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _neonYellow = const Color(0xFFD0FD3E);
-  final Color _neonBlue = Colors.blueAccent;
+  User? get _user => _supabase.auth.currentUser;
 
   @override
   void initState() {
     super.initState();
-    // Initialize with existing data
-    _nameController = TextEditingController(
-      text: widget.currentData['displayName'] ?? "",
-    );
-    _weightController = TextEditingController(
-      text: widget.currentData['weight']?.toString() ?? "",
-    );
-    _heightController = TextEditingController(
-      text: widget.currentData['height']?.toString() ?? "",
-    );
-    _ageController = TextEditingController(
-      text: widget.currentData['age']?.toString() ?? "",
-    );
+    _nameController = TextEditingController();
+    _phoneController = TextEditingController();
+    _loadUserData();
+  }
 
-    // Safety checks for dropdowns to ensure values exist in our lists
-    if (_goals.contains(widget.currentData['primaryGoal'])) {
-      _selectedGoal = widget.currentData['primaryGoal'];
-    } else if (_goals.contains(widget.currentData['goal'])) {
-      _selectedGoal = widget.currentData['goal'];
-    }
+  Future<void> _loadUserData() async {
+    if (_user == null) return;
+    try {
+      final data = await _supabase
+          .from('users')
+          .select()
+          .eq('id', _user!.id)
+          .maybeSingle();
 
-    if (_levels.contains(widget.currentData['fitnessLevel'])) {
-      _selectedLevel = widget.currentData['fitnessLevel'];
-    }
-
-    if (_equipmentOptions.contains(widget.currentData['equipment'])) {
-      _selectedEquipment = widget.currentData['equipment'];
-    }
-
-    if (_genders.contains(widget.currentData['gender'])) {
-      _selectedGender = widget.currentData['gender'];
-    }
-
-    if (_activities.contains(widget.currentData['activity_level'])) {
-      _selectedActivity = widget.currentData['activity_level'];
+      if (data != null) {
+        setState(() {
+          _nameController.text = data['displayName'] ?? '';
+          _phoneController.text = data['phone'] ?? '';
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading profile: $e");
+    } finally {
+      setState(() => _isInitialLoading = false);
     }
   }
 
   Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() => _isLoading = true);
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
     try {
-      double weight = double.tryParse(_weightController.text) ?? 0;
-      double height = double.tryParse(_heightController.text) ?? 0;
+      await _supabase.auth.updateUser(
+        UserAttributes(data: {'full_name': _nameController.text.trim()}),
+      );
 
-      // Auto-Calculate BMI for AI
-      double bmi = 0;
-      if (weight > 0 && height > 0) {
-        bmi = weight / ((height / 100) * (height / 100));
-      }
-
-      // --- SMART SYNC WRITE ---
-      // We write to both legacy fields (for ProfileScreen) and new fields (for AI)
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'displayName': _nameController.text.trim(),
-        'age': int.tryParse(_ageController.text) ?? 0,
-        'gender': _selectedGender,
-        'weight': weight,
-        'height': height,
-        'bmi': double.parse(bmi.toStringAsFixed(1)),
-
-        // AI SPECIFIC FIELDS
-        'fitnessLevel': _selectedLevel, // AI Needs this
-        'primaryGoal': _selectedGoal, // AI Needs this
-        'goal': _selectedGoal, // ProfileScreen uses this
-        'equipment': _selectedEquipment, // AI Needs this
-        'activity_level': _selectedActivity,
-
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await _supabase
+          .from('users')
+          .update({
+            'displayName': _nameController.text.trim(),
+            'phone': _phoneController.text.trim(),
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', _user!.id);
 
       if (mounted) {
-        Navigator.pop(context); // Go back to Profile
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Profile Updated & Synced with AI!"),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text("Profile updated successfully!")),
         );
+        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text("Update failed: $e"),
+            backgroundColor: Colors.red,
+          ),
         );
-        setState(() => _isLoading = false);
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    bool isDark = ThemeManager.instance.isDark;
+
+    if (_isInitialLoading) {
+      return Scaffold(
+        backgroundColor: isDark ? Colors.black : Colors.white,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: _bgBlack,
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF5F5F5),
       appBar: AppBar(
+        title: const Text("Edit Profile"),
         backgroundColor: Colors.transparent,
-        title: const Text(
-          "Edit Profile",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          _isLoading
-              ? const Padding(
-                  padding: EdgeInsets.all(15),
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2,
-                  ),
-                )
-              : TextButton(
-                  onPressed: _saveProfile,
-                  child: Text(
-                    "SAVE",
-                    style: TextStyle(
-                      color: _neonYellow,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-        ],
+        elevation: 0,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildSectionHeader("Basic Info"),
-            _buildTextField("Display Name", _nameController),
-            const SizedBox(height: 15),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField("Age", _ageController, isNumber: true),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: _buildDropdown(
-                    "Gender",
-                    _genders,
-                    _selectedGender,
-                    (v) => setState(() => _selectedGender = v!),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+              _buildTextField("Display Name", _nameController, Icons.person),
+              const SizedBox(height: 20),
+              _buildTextField(
+                "Phone Number",
+                _phoneController,
+                Icons.phone,
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 40),
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _saveProfile,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD0FD3E),
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.black)
+                      : const Text(
+                          "SAVE CHANGES",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                 ),
-              ],
-            ),
-
-            const SizedBox(height: 30),
-            _buildSectionHeader("Body Stats (For AI)"),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    "Weight (kg)",
-                    _weightController,
-                    isNumber: true,
-                  ),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: _buildTextField(
-                    "Height (cm)",
-                    _heightController,
-                    isNumber: true,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 30),
-            _buildSectionHeader("Training Preferences"),
-            _buildDropdown(
-              "Fitness Level",
-              _levels,
-              _selectedLevel,
-              (v) => setState(() => _selectedLevel = v!),
-            ),
-            const SizedBox(height: 15),
-            _buildDropdown(
-              "Primary Goal",
-              _goals,
-              _selectedGoal,
-              (v) => setState(() => _selectedGoal = v!),
-            ),
-            const SizedBox(height: 15),
-            _buildDropdown(
-              "Access to Equipment",
-              _equipmentOptions,
-              _selectedEquipment,
-              (v) => setState(() => _selectedEquipment = v!),
-            ),
-            const SizedBox(height: 15),
-            _buildDropdown(
-              "Activity Level",
-              _activities,
-              _selectedActivity,
-              (v) => setState(() => _selectedActivity = v!),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 15),
-      child: Text(
-        title,
-        style: TextStyle(
-          color: _neonBlue,
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.0,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -282,69 +158,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Widget _buildTextField(
     String label,
-    TextEditingController controller, {
-    bool isNumber = false,
+    TextEditingController controller,
+    IconData icon, {
+    TextInputType? keyboardType,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-      decoration: BoxDecoration(
-        color: _cardDark,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: TextField(
-        controller: controller,
-        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          labelText: label,
-          labelStyle: const TextStyle(color: Colors.grey),
+    bool isDark = ThemeManager.instance.isDark;
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: TextStyle(color: isDark ? Colors.white : Colors.black),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, color: Colors.grey),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide.none,
         ),
       ),
-    );
-  }
-
-  Widget _buildDropdown(
-    String label,
-    List<String> items,
-    String current,
-    Function(String?) onChanged,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-      decoration: BoxDecoration(
-        color: _cardDark,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: current,
-              dropdownColor: _cardDark,
-              isExpanded: true,
-              icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-              items: items
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
+      validator: (v) => v!.trim().isEmpty ? "Required" : null,
     );
   }
 }

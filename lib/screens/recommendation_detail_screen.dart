@@ -1,8 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:fitcoach_/screens/workout/stretching_timer_screen.dart';
-import 'package:fitcoach_/screens/workout/auto_workout_generator.dart';
-import 'package:fitcoach_/screens/nutrition/ai_chef_screen.dart';
-import 'package:fitcoach_/screens/article_screen.dart'; // ✅ Added the Article Screen import
 
 class RecommendationDetailScreen extends StatelessWidget {
   final String title;
@@ -12,7 +8,6 @@ class RecommendationDetailScreen extends StatelessWidget {
   final Color color;
   final String imageUrl;
   final String description;
-  final String buttonText;
 
   const RecommendationDetailScreen({
     super.key,
@@ -23,19 +18,23 @@ class RecommendationDetailScreen extends StatelessWidget {
     required this.color,
     required this.imageUrl,
     required this.description,
-    required this.buttonText,
   });
 
   @override
   Widget build(BuildContext context) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color _bgBlack = Theme.of(context).scaffoldBackgroundColor;
+    Color _cardDark = Theme.of(context).cardColor;
+    Color _textWhite = isDark ? Colors.white : Colors.black;
+    Color _textGrey = isDark ? Colors.grey : Colors.black54;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: _bgBlack,
       body: CustomScrollView(
         slivers: [
-          // --- EXPANDING IMAGE HEADER ---
           SliverAppBar(
             expandedHeight: 350,
-            backgroundColor: Colors.black,
+            backgroundColor: _bgBlack,
             pinned: true,
             leading: IconButton(
               icon: Container(
@@ -60,8 +59,14 @@ class RecommendationDetailScreen extends StatelessWidget {
                     imageUrl,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => Container(
-                      color: Colors.grey.shade900,
-                      child: Icon(icon, color: Colors.white24, size: 80),
+                      color: isDark
+                          ? Colors.grey.shade900
+                          : Colors.grey.shade200,
+                      child: Icon(
+                        icon,
+                        color: _textGrey.withOpacity(0.5),
+                        size: 80,
+                      ),
                     ),
                   ),
                   Container(
@@ -71,8 +76,8 @@ class RecommendationDetailScreen extends StatelessWidget {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          Colors.black.withOpacity(0.8),
-                          Colors.black,
+                          _bgBlack.withOpacity(0.8),
+                          _bgBlack,
                         ],
                         stops: const [0.6, 0.9, 1.0],
                       ),
@@ -82,8 +87,6 @@ class RecommendationDetailScreen extends StatelessWidget {
               ),
             ),
           ),
-
-          // --- CONTENT SECTION ---
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(20.0),
@@ -113,18 +116,15 @@ class RecommendationDetailScreen extends StatelessWidget {
                       ),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.timer_outlined,
-                            color: Colors.grey,
+                            color: _textGrey,
                             size: 18,
                           ),
                           const SizedBox(width: 5),
                           Text(
                             metric,
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 14,
-                            ),
+                            style: TextStyle(color: _textGrey, fontSize: 14),
                           ),
                         ],
                       ),
@@ -133,98 +133,52 @@ class RecommendationDetailScreen extends StatelessWidget {
                   const SizedBox(height: 20),
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: _textWhite,
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Overview",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    description,
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 16,
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 30),
 
-                  // --- SMART ACTION BUTTON ---
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: color,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
+                  // Elaborate Description Card
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: _cardDark,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                        color: isDark ? Colors.white10 : Colors.black12,
                       ),
-                      onPressed: () {
-                        // Dynamic Routing based on the Tag!
-                        if (tag == "WORKOUT") {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  AutoWorkoutGenerator(routineName: title),
-                            ),
-                          );
-                        } else if (tag == "RECOVERY") {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  StretchingTimerScreen(routineName: title),
-                            ),
-                          );
-                        } else if (tag == "NUTRITION") {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AiChefScreen(),
-                            ),
-                          );
-                        } else if (tag == "AI TIP") {
-                          // ✅ Routes to the new Article Screen
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ArticleScreen(
-                                title: title,
-                                imageUrl: imageUrl,
-                                color: color,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(icon, color: color, size: 24),
+                            const SizedBox(width: 10),
+                            Text(
+                              "The Breakdown",
+                              style: TextStyle(
+                                color: _textWhite,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                          );
-                        } else {
-                          // Generic Fallback
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text("Launching $title..."),
-                              backgroundColor: color,
-                            ),
-                          );
-                        }
-                      },
-                      child: Text(
-                        buttonText,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 15),
+                        Text(
+                          description,
+                          style: TextStyle(
+                            color: _textWhite.withOpacity(0.8),
+                            fontSize: 16,
+                            height: 1.6,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 40),

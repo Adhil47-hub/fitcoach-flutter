@@ -1,5 +1,3 @@
-// lib/services/exercise_service.dart
-
 class Exercise {
   final String id;
   final String name;
@@ -15,8 +13,6 @@ class Exercise {
 }
 
 class ExerciseService {
-  // This simulates an API response.
-  // Later, we will replace this with: http.get('https://api.api-ninjas.com/v1/exercises')
   static List<Exercise> getExercises() {
     return [
       Exercise(

@@ -140,7 +140,7 @@ class _OnboardingScreen2State extends State<OnboardingScreen2> {
               ),
             ),
 
-            const Spacer(), // Push button down
+            const Spacer(),
 
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),

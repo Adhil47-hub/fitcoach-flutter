@@ -1,5 +1,3 @@
-// This file holds the long text for Privacy Policy and Terms
-
 const String privacyPolicyText = """
 Privacy Policy for Fitcoach
 Last updated: 17 November 2025

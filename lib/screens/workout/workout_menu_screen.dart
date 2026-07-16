@@ -1,5 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fitcoach_/screens/workout/ai_generate_screen.dart';
 import 'package:fitcoach_/screens/workout/routines_screen.dart';
 import 'package:fitcoach_/widgets/weekly_calender.dart';
@@ -15,28 +14,75 @@ class WorkoutMenuScreen extends StatefulWidget {
 }
 
 class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
-  final Color _bgBlack = const Color(0xFF0F0F10);
-  final Color _cardDark = const Color(0xFF1C1C1E);
+  final _supabase = Supabase.instance.client;
+
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _neonYellow =>
+      isDark ? const Color(0xFFD0FD3E) : const Color(0xFF00A86B);
+
+  final Color _neonGreen = const Color(0xFF00E676);
   final Color _neonBlue = const Color(0xFF2F80ED);
-  final Color _neonGreen = const Color(0xFFD0FD3E);
 
   String _selectedDay = DateFormat('EEEE').format(DateTime.now());
 
+  List<Map<String, dynamic>> _routines = [];
+  bool _isLoading = true;
+  Key _calendarKey = UniqueKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRoutines();
+  }
+
+  Future<void> _loadRoutines() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    final data = await _supabase
+        .from('routines')
+        .select()
+        .eq('user_id', user.id);
+
+    if (mounted) {
+      setState(() {
+        _routines = List<Map<String, dynamic>>.from(data);
+        _isLoading = false;
+        _calendarKey = UniqueKey();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabase.auth.currentUser;
 
-    if (user == null)
-      return const Scaffold(body: Center(child: Text("Please Login")));
+    if (user == null) {
+      return Scaffold(
+        backgroundColor: _bgBlack,
+        body: Center(
+          child: Text("Please Login", style: TextStyle(color: _textWhite)),
+        ),
+      );
+    }
+
+    final dailyRoutines = _routines
+        .where((r) => r['day'] == _selectedDay)
+        .toList();
 
     return Scaffold(
       backgroundColor: _bgBlack,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        iconTheme: IconThemeData(color: _textWhite),
+        title: Text(
           "Workouts",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
         ),
       ),
       body: Column(
@@ -51,10 +97,14 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
                     label: "My Routines",
                     icon: Icons.list_alt,
                     color: Colors.purpleAccent,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const RoutinesScreen()),
-                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const RoutinesScreen(),
+                        ),
+                      ).then((_) => _loadRoutines());
+                    },
                   ),
                 ),
                 const SizedBox(width: 15),
@@ -63,68 +113,51 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
                     label: "AI Generator",
                     icon: Icons.auto_awesome,
                     color: _neonGreen,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AiGenerateScreen(),
-                      ),
-                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AiGenerateScreen(),
+                        ),
+                      ).then((_) => _loadRoutines());
+                    },
                   ),
                 ),
               ],
             ),
           ),
-
           const SizedBox(height: 10),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
             child: Text(
               "Weekly Schedule",
               style: TextStyle(
-                color: Colors.grey,
+                color: _textGrey,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
-
           WeeklyCalendar(
+            key: _calendarKey,
             initialDay: _selectedDay,
             onDaySelected: (day) {
               setState(() => _selectedDay = day);
             },
           ),
-
-          const Divider(color: Colors.white10, height: 1),
-
+          Divider(color: isDark ? Colors.white10 : Colors.black12, height: 1),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid)
-                  .collection('routines')
-                  .where('day', isEqualTo: _selectedDay)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return _buildEmptyState();
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: snapshot.data!.docs.length,
-                  itemBuilder: (context, index) {
-                    var doc = snapshot.data!.docs[index];
-                    return _buildWorkoutCard(doc);
-                  },
-                );
-              },
-            ),
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: _neonYellow))
+                : dailyRoutines.isEmpty
+                ? _buildEmptyState()
+                : ListView.builder(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: dailyRoutines.length,
+                    itemBuilder: (context, index) {
+                      return _buildWorkoutCard(dailyRoutines[index]);
+                    },
+                  ),
           ),
         ],
       ),
@@ -144,7 +177,7 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
         decoration: BoxDecoration(
           color: _cardDark,
           borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -153,8 +186,8 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
             const SizedBox(width: 10),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: _textWhite,
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
               ),
@@ -165,8 +198,7 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     );
   }
 
-  Widget _buildWorkoutCard(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  Widget _buildWorkoutCard(Map<String, dynamic> data) {
     String title = data['title'] ?? "Workout";
     List exercises = data['exercises'] ?? [];
     int duration = exercises.length * 4;
@@ -175,8 +207,9 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     if (exercises.isNotEmpty) {
       Set<String> targets = {};
       for (var ex in exercises) {
-        if (ex['target'] != null)
+        if (ex['target'] != null) {
           targets.add(ex['target'].toString().split(' ')[0].toUpperCase());
+        }
       }
       subtitle = targets.take(3).join(" • ");
     }
@@ -185,20 +218,32 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
       margin: const EdgeInsets.only(bottom: 15),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [const Color(0xFF1C1C1E), const Color(0xFF2C2C2E)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: _cardDark,
+        gradient: isDark
+            ? const LinearGradient(
+                colors: [Color(0xFF1C1C1E), Color(0xFF2C2C2E)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+        boxShadow: isDark
+            ? [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.15),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 3),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,8 +254,8 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: _textWhite,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
@@ -218,19 +263,20 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
                 ),
               ),
               PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: Colors.grey),
+                icon: Icon(Icons.more_vert, color: _textGrey),
                 color: _cardDark,
                 onSelected: (value) {
-                  if (value == 'reschedule')
-                    _showRescheduleDialog(doc.id, _selectedDay);
-                  if (value == 'delete') _deleteWorkout(doc.id);
+                  if (value == 'reschedule') {
+                    _showRescheduleDialog(data['id'].toString(), _selectedDay);
+                  }
+                  if (value == 'delete') _deleteWorkout(data['id'].toString());
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'reschedule',
                     child: Text(
                       "Reschedule",
-                      style: TextStyle(color: Colors.white),
+                      style: TextStyle(color: _textWhite),
                     ),
                   ),
                   const PopupMenuItem(
@@ -244,7 +290,6 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 5),
           Text(
             subtitle,
@@ -255,42 +300,37 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
             ),
           ),
           const SizedBox(height: 15),
-
           Row(
             children: [
-              Icon(Icons.fitness_center, size: 14, color: Colors.grey[500]),
+              Icon(Icons.fitness_center, size: 14, color: _textGrey),
               const SizedBox(width: 5),
               Text(
                 "${exercises.length} Exercises",
-                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                style: TextStyle(color: _textGrey, fontSize: 12),
               ),
               const SizedBox(width: 15),
-              Icon(Icons.timer, size: 14, color: Colors.grey[500]),
+              Icon(Icons.timer, size: 14, color: _textGrey),
               const SizedBox(width: 5),
               Text(
                 "~$duration Mins",
-                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                style: TextStyle(color: _textGrey, fontSize: 12),
               ),
             ],
           ),
-
           const SizedBox(height: 20),
-
           SizedBox(
             width: double.infinity,
             height: 45,
             child: ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ActiveWorkoutScreen(
-                      routineTitle: title,
-                      exercises: exercises,
-                    ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ActiveWorkoutScreen(
+                    routineTitle: title,
+                    exercises: exercises,
                   ),
-                );
-              },
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _neonBlue,
                 shape: RoundedRectangleBorder(
@@ -311,34 +351,34 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     );
   }
 
-  // --- UPDATED: EMPTY STATE REPLACED GENERATE WITH "CHOOSE FROM MY ROUTINES" ---
   Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.spa, size: 60, color: Colors.grey[800]),
+          Icon(Icons.spa, size: 60, color: _textGrey),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             "Rest Day",
             style: TextStyle(
-              color: Colors.white,
+              color: _textWhite,
               fontSize: 24,
               fontWeight: FontWeight.bold,
             ),
           ),
           Text(
             "No workout scheduled for $_selectedDay",
-            style: const TextStyle(color: Colors.grey),
+            style: TextStyle(color: _textGrey),
           ),
           const SizedBox(height: 30),
-
           OutlinedButton.icon(
             onPressed: () => _showAssignRoutineSheet(),
-            icon: const Icon(Icons.list_alt, color: Colors.white),
-            label: const Text("Choose from My Routines"),
+            icon: Icon(Icons.list_alt, color: _textWhite),
+            label: Text(
+              "Choose from My Routines",
+              style: TextStyle(color: _textWhite),
+            ),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
               side: BorderSide(color: _neonBlue),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -350,7 +390,6 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     );
   }
 
-  // --- NEW LOGIC: ASSIGN ROUTINE FROM BOTTOM SHEET ---
   void _showAssignRoutineSheet() {
     showModalBottomSheet(
       context: context,
@@ -359,7 +398,10 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        final user = FirebaseAuth.instance.currentUser;
+        final availableRoutines = _routines
+            .where((r) => r['day'] != _selectedDay)
+            .toList();
+
         return Container(
           padding: const EdgeInsets.all(20),
           constraints: BoxConstraints(
@@ -369,109 +411,85 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
             children: [
               Text(
                 "Schedule for $_selectedDay",
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: _textWhite,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 "Select a routine to assign to this day.",
-                style: TextStyle(color: Colors.grey, fontSize: 14),
+                style: TextStyle(color: _textGrey, fontSize: 14),
               ),
               const SizedBox(height: 20),
               Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(user?.uid)
-                      .collection('routines')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData)
-                      return const Center(
-                        child: Text(
-                          "No routines found.",
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      );
-
-                    var routines = snapshot.data!.docs.where((doc) {
-                      var data = doc.data() as Map<String, dynamic>;
-                      return data['day'] !=
-                          _selectedDay; // Exclude ones already on this day
-                    }).toList();
-
-                    if (routines.isEmpty) {
-                      return const Center(
+                child: availableRoutines.isEmpty
+                    ? Center(
                         child: Text(
                           "No other routines available.\nCreate one in 'My Routines'.",
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(color: _textGrey),
                         ),
-                      );
-                    }
-
-                    return ListView.builder(
-                      itemCount: routines.length,
-                      itemBuilder: (context, index) {
-                        var doc = routines[index];
-                        var data = doc.data() as Map<String, dynamic>;
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.black26,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.white10),
-                          ),
-                          child: ListTile(
-                            title: Text(
-                              data['title'] ?? "Workout",
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                      )
+                    : ListView.builder(
+                        itemCount: availableRoutines.length,
+                        itemBuilder: (context, index) {
+                          final data = availableRoutines[index];
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.black26
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? Colors.white10 : Colors.black12,
                               ),
                             ),
-                            subtitle: Text(
-                              data['day'] ?? "Unscheduled",
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 12,
+                            child: ListTile(
+                              title: Text(
+                                data['title'] ?? "Workout",
+                                style: TextStyle(
+                                  color: _textWhite,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
-                            trailing: const Icon(
-                              Icons.add_circle_outline,
-                              color: Colors.blueAccent,
-                            ),
-                            onTap: () async {
-                              await FirebaseFirestore.instance
-                                  .collection('users')
-                                  .doc(user!.uid)
-                                  .collection('routines')
-                                  .doc(doc.id)
-                                  .update({'day': _selectedDay});
-                              if (mounted) {
+                              subtitle: Text(
+                                data['day'] ?? "Unscheduled",
+                                style: TextStyle(
+                                  color: _textGrey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              trailing: const Icon(
+                                Icons.add_circle_outline,
+                                color: Colors.blueAccent,
+                              ),
+                              onTap: () async {
                                 Navigator.pop(context);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      "Scheduled for $_selectedDay",
+
+                                await _supabase
+                                    .from('routines')
+                                    .update({'day': _selectedDay})
+                                    .eq('id', data['id']);
+
+                                if (mounted) {
+                                  await _loadRoutines();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        "Scheduled for $_selectedDay",
+                                      ),
+                                      backgroundColor: _neonBlue,
                                     ),
-                                    backgroundColor: _neonBlue,
-                                  ),
-                                );
-                              }
-                            },
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
+                                  );
+                                }
+                              },
+                            ),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
@@ -480,7 +498,7 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     );
   }
 
-  void _showRescheduleDialog(String docId, String currentDay) {
+  void _showRescheduleDialog(String routineId, String currentDay) {
     showModalBottomSheet(
       context: context,
       backgroundColor: _cardDark,
@@ -503,10 +521,10 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              Text(
                 "Reschedule Workout",
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textWhite,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -521,31 +539,25 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
                           title: Text(
                             day,
                             style: TextStyle(
-                              color: day == currentDay
-                                  ? Colors.grey
-                                  : Colors.white,
+                              color: day == currentDay ? _textGrey : _textWhite,
                             ),
                           ),
                           trailing: day == currentDay
-                              ? const Icon(Icons.check, color: Colors.grey)
+                              ? Icon(Icons.check, color: _textGrey)
                               : null,
                           onTap: () async {
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(FirebaseAuth.instance.currentUser!.uid)
-                                .collection('routines')
-                                .doc(docId)
-                                .update({'day': day});
+                            Navigator.pop(context);
+
+                            await _supabase
+                                .from('routines')
+                                .update({'day': day})
+                                .eq('id', routineId);
 
                             if (mounted) {
-                              Navigator.pop(context);
+                              await _loadRoutines();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    day == "Unscheduled"
-                                        ? "Removed from schedule"
-                                        : "Moved to $day",
-                                  ),
+                                  content: Text("Moved to $day"),
                                   backgroundColor: _neonBlue,
                                 ),
                               );
@@ -563,24 +575,21 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
     );
   }
 
-  void _deleteWorkout(String docId) async {
+  void _deleteWorkout(String routineId) async {
     bool confirm =
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: _cardDark,
-            title: const Text(
-              "Delete Workout?",
-              style: TextStyle(color: Colors.white),
-            ),
-            content: const Text(
+            title: Text("Delete Workout?", style: TextStyle(color: _textWhite)),
+            content: Text(
               "This cannot be undone.",
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: _textGrey),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
+                child: Text("Cancel", style: TextStyle(color: _textWhite)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
@@ -595,12 +604,10 @@ class _WorkoutMenuScreenState extends State<WorkoutMenuScreen> {
         false;
 
     if (confirm) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser!.uid)
-          .collection('routines')
-          .doc(docId)
-          .delete();
+      await _supabase.from('routines').delete().eq('id', routineId);
+      if (mounted) {
+        await _loadRoutines();
+      }
     }
   }
 }

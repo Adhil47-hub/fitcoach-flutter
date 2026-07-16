@@ -1,9 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fitcoach_/models/exercise_model.dart';
-import 'package:fitcoach_/models/routine_exercise.dart'; // Import the model above
+import 'package:fitcoach_/models/routine_exercise.dart';
 import 'package:fitcoach_/screens/workout/exercise_list_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CreateRoutineScreen extends StatefulWidget {
   const CreateRoutineScreen({super.key});
@@ -13,37 +12,36 @@ class CreateRoutineScreen extends StatefulWidget {
 }
 
 class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
+  final _supabase = Supabase.instance.client;
   final TextEditingController _titleController = TextEditingController();
-  final List<RoutineExercise> _addedExercises = []; // Stores RoutineExercises
+  final List<RoutineExercise> _addedExercises = [];
   bool _isSaving = false;
 
-  // Colors
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _blueAccent = Colors.blueAccent;
-  final Color _supersetPurple = const Color(0xFFBB86FC);
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _inputBg => isDark ? Colors.black : Colors.grey.shade200;
 
-  // --- FIX: THE MISSING LOGIC ---
+  final Color _blueAccent = Colors.blueAccent;
+
   void _openExerciseList() async {
-    // 1. Wait for the list screen to return data
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ExerciseListScreen()),
     );
 
-    // 2. Check if we got data back
     if (result != null && result is List<Exercise>) {
       setState(() {
-        // 3. CONVERT 'Exercise' -> 'RoutineExercise'
         for (var ex in result) {
-          // Check if already added to avoid duplicates if desired
           if (!_addedExercises.any((e) => e.id == ex.id)) {
             _addedExercises.add(
               RoutineExercise(
                 id: ex.id,
                 name: ex.name,
                 bodyPart: ex.bodyPart,
-                sets: [WorkoutSet()], // Start with 1 empty set
+                sets: [WorkoutSet()],
               ),
             );
           }
@@ -69,38 +67,44 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = _supabase.auth.currentUser;
       if (user == null) return;
 
       final routineData = {
-        'title': _titleController.text,
+        'user_id': user.id,
+        'title': _titleController.text.trim(),
         'exercises': _addedExercises.map((e) => e.toMap()).toList(),
-        'createdAt': FieldValue.serverTimestamp(),
+        'day': 'Unscheduled',
+        'createdAt': DateTime.now().toIso8601String(),
       };
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('routines')
-          .add(routineData);
+      await _supabase.from('routines').insert(routineData);
 
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Routine Saved!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error: $e")));
-      setState(() => _isSaving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
+        setState(() => _isSaving = false);
+      }
     }
   }
 
-  // Helper to add a set to a specific exercise
   void _addSet(int index) {
     setState(() {
       _addedExercises[index].sets.add(WorkoutSet());
     });
   }
 
-  // Helper to remove an exercise
   void _removeExercise(int index) {
     setState(() {
       _addedExercises.removeAt(index);
@@ -113,28 +117,32 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
       backgroundColor: _bgBlack,
       appBar: AppBar(
         backgroundColor: _bgBlack,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
+          icon: Icon(Icons.close, color: _textWhite),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           "Create Routine",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
         ),
         actions: [
           _isSaving
-              ? const Center(
+              ? Center(
                   child: Padding(
-                    padding: EdgeInsets.only(right: 20),
-                    child: CircularProgressIndicator(),
+                    padding: const EdgeInsets.only(right: 20),
+                    child: CircularProgressIndicator(
+                      color: _blueAccent,
+                      strokeWidth: 2,
+                    ),
                   ),
                 )
               : TextButton(
                   onPressed: _saveRoutine,
-                  child: const Text(
+                  child: Text(
                     "Save",
                     style: TextStyle(
-                      color: Colors.blueAccent,
+                      color: _blueAccent,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -144,34 +152,30 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
       ),
       body: Column(
         children: [
-          // Routine Title Input
           Container(
             padding: const EdgeInsets.all(20),
             color: _cardDark,
             child: TextField(
               controller: _titleController,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: _textWhite,
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: "Routine Title (e.g., Chest Day)",
-                hintStyle: TextStyle(color: Colors.grey),
+                hintStyle: TextStyle(color: _textGrey),
                 border: InputBorder.none,
               ),
             ),
           ),
-
           const SizedBox(height: 10),
-
-          // Exercise List
           Expanded(
             child: _addedExercises.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       "No exercises added yet",
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: _textGrey),
                     ),
                   )
                 : ListView.builder(
@@ -182,15 +186,13 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
                     },
                   ),
           ),
-
-          // "Add Exercise" Button
           Padding(
             padding: const EdgeInsets.all(20),
             child: SizedBox(
               width: double.infinity,
               height: 55,
               child: ElevatedButton(
-                onPressed: _openExerciseList, // Calls the fixed function
+                onPressed: _openExerciseList,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _blueAccent,
                   shape: RoundedRectangleBorder(
@@ -222,6 +224,7 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
       decoration: BoxDecoration(
         color: _cardDark,
         borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,36 +235,34 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
               Expanded(
                 child: Text(
                   exercise.name,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: _textWhite,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete, color: Colors.redAccent),
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                 onPressed: () => _removeExercise(index),
               ),
             ],
           ),
           const SizedBox(height: 10),
-
-          // Header Row
           Row(
-            children: const [
+            children: [
               SizedBox(
                 width: 30,
                 child: Text(
                   "SET",
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                  style: TextStyle(color: _textGrey, fontSize: 12),
                 ),
               ),
               Expanded(
                 child: Center(
                   child: Text(
                     "KG",
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                    style: TextStyle(color: _textGrey, fontSize: 12),
                   ),
                 ),
               ),
@@ -269,15 +270,13 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
                 child: Center(
                   child: Text(
                     "REPS",
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                    style: TextStyle(color: _textGrey, fontSize: 12),
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 5),
-
-          // Sets List
+          const Divider(height: 20),
           ...exercise.sets.asMap().entries.map((entry) {
             int setIndex = entry.key;
             WorkoutSet set = entry.value;
@@ -289,8 +288,8 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
                     width: 30,
                     child: Text(
                       "${setIndex + 1}",
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: _textWhite,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -300,12 +299,13 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 5),
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(5),
+                        color: _inputBg,
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: TextField(
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: _textWhite),
                         textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           hintText: "-",
@@ -320,12 +320,13 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 5),
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(5),
+                        color: _inputBg,
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: TextField(
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: _textWhite),
                         textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           border: InputBorder.none,
                           hintText: "-",
@@ -339,15 +340,12 @@ class _CreateRoutineScreenState extends State<CreateRoutineScreen> {
               ),
             );
           }).toList(),
-
-          // Add Set Button
           Center(
-            child: TextButton(
+            child: TextButton.icon(
               onPressed: () => _addSet(index),
-              child: const Text(
-                "+ Add Set",
-                style: TextStyle(color: Colors.blueAccent),
-              ),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text("Add Set"),
+              style: TextButton.styleFrom(foregroundColor: _blueAccent),
             ),
           ),
         ],

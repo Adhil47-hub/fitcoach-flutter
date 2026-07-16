@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ActivityDetailsScreen extends StatelessWidget {
-  // --- REAL DATA REQUIRED FROM BACKEND ---
+class ActivityDetailsScreen extends StatefulWidget {
   final int steps;
   final int stepGoal;
   final double water;
@@ -29,30 +29,211 @@ class ActivityDetailsScreen extends StatelessWidget {
     required this.streakDays,
   });
 
-  final Color _bgBlack = const Color(0xFF000000);
-  final Color _cardDark = const Color(0xFF1C1C1E);
+  @override
+  State<ActivityDetailsScreen> createState() => _ActivityDetailsScreenState();
+}
+
+class _ActivityDetailsScreenState extends State<ActivityDetailsScreen> {
   final Color _purpleAccent = const Color(0xFFBB86FC);
-  final Color _neonYellow = const Color(0xFFD0FD3E);
   final Color _neonBlue = const Color(0xFF2F80ED);
   final Color _neonGreen = const Color(0xFF00E676);
   final Color _orangeAccent = Colors.orangeAccent;
 
+  late double _currentSleepHours;
+  final _supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentSleepHours = widget.sleepHours;
+  }
+
+  String get _todayKey {
+    final now = DateTime.now();
+    return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+  }
+
+  Future<void> _logSleep(double hours) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _currentSleepHours = hours;
+    });
+
+    try {
+      // ✅ SAFELY FETCH ROW TO PREVENT DATA LOSS
+      final existingLog = await _supabase
+          .from('daily_logs')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('log_date', _todayKey)
+          .maybeSingle();
+
+      if (existingLog != null) {
+        // Update only sleep
+        await _supabase
+            .from('daily_logs')
+            .update({
+              'sleep': _currentSleepHours,
+              'last_updated': DateTime.now().toIso8601String(),
+            })
+            .eq('id', existingLog['id']);
+      } else {
+        // Insert a new fresh row for today
+        await _supabase.from('daily_logs').insert({
+          'user_id': user.id,
+          'log_date': _todayKey,
+          'sleep': _currentSleepHours,
+          'last_updated': DateTime.now().toIso8601String(),
+        });
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "🌙 Logged ${_currentSleepHours.toStringAsFixed(1)} hours of sleep.",
+            ),
+            backgroundColor: Colors.indigoAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error logging sleep: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to save sleep data: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showSleepDialog() {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final TextEditingController _sleepController = TextEditingController(
+      text: _currentSleepHours > 0 ? _currentSleepHours.toString() : "",
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Theme.of(context).cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            "Log Sleep",
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "How many hours did you sleep last night?",
+                style: TextStyle(color: isDark ? Colors.grey : Colors.black54),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: _sleepController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                decoration: InputDecoration(
+                  hintText: "e.g., 7.5",
+                  hintStyle: const TextStyle(color: Colors.grey),
+                  filled: true,
+                  fillColor: isDark ? Colors.black : Colors.white,
+                  suffixText: "hrs",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: isDark
+                        ? BorderSide.none
+                        : BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                double? parsedHours = double.tryParse(_sleepController.text);
+                if (parsedHours != null &&
+                    parsedHours >= 0 &&
+                    parsedHours <= 24) {
+                  _logSleep(parsedHours);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Please enter a valid number of hours."),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigoAccent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                "Save",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Calculate accurate progress bars
-    double stepProgress = (steps / stepGoal).clamp(0.0, 1.0);
-    double waterProgress = (water / waterGoal).clamp(0.0, 1.0);
-    double fuelProgress = caloriesGoal > 0 ? (calories / caloriesGoal).clamp(0.0, 1.0) : 0;
-    double sleepProgress = (sleepHours / sleepGoal).clamp(0.0, 1.0);
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color bgBlack = Theme.of(context).scaffoldBackgroundColor;
+    Color textColor = isDark ? Colors.white : Colors.black;
+    Color neonYellow = isDark
+        ? const Color(0xFFD0FD3E)
+        : const Color(0xFF00A86B);
+
+    double stepProgress = (widget.steps / widget.stepGoal).clamp(0.0, 1.0);
+    double waterProgress = (widget.water / widget.waterGoal).clamp(0.0, 1.0);
+    double fuelProgress = widget.caloriesGoal > 0
+        ? (widget.calories / widget.caloriesGoal).clamp(0.0, 1.0)
+        : 0;
+    double sleepProgress = (_currentSleepHours / widget.sleepGoal).clamp(
+      0.0,
+      1.0,
+    );
 
     return Scaffold(
-      backgroundColor: _bgBlack,
+      backgroundColor: bgBlack,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text("Today's Activity", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          "Today's Activity",
+          style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -60,32 +241,93 @@ class ActivityDetailsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Row 1: Steps & Water
             Row(
               children: [
-                Expanded(child: _buildStatCard("Steps", "$steps", "/ $stepGoal", Icons.directions_walk, _neonYellow, stepProgress)),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    "Steps",
+                    "${widget.steps}",
+                    "/ ${widget.stepGoal}",
+                    Icons.directions_walk,
+                    neonYellow,
+                    stepProgress,
+                    null,
+                  ),
+                ),
                 const SizedBox(width: 15),
-                Expanded(child: _buildStatCard("Water", "${water.toStringAsFixed(1)}L", "/ ${waterGoal.toStringAsFixed(1)}L", Icons.water_drop, _neonBlue, waterProgress)),
-              ],
-            ),
-            const SizedBox(height: 15),
-            
-            // Row 2: Fuel & Workout
-            Row(
-              children: [
-                Expanded(child: _buildStatCard("Fuel", "$calories", "/ $caloriesGoal Kcal", Icons.local_fire_department, Colors.redAccent, fuelProgress)),
-                const SizedBox(width: 15),
-                Expanded(child: _buildWorkoutCard("Workout", workoutName, isWorkoutDone ? "Completed" : "Not Started", Icons.fitness_center, _purpleAccent, isWorkoutDone)),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    "Water",
+                    "${widget.water.toStringAsFixed(1)}L",
+                    "/ ${widget.waterGoal.toStringAsFixed(1)}L",
+                    Icons.water_drop,
+                    _neonBlue,
+                    waterProgress,
+                    null,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 15),
 
-            // Row 3: Sleep & Streak
             Row(
               children: [
-                Expanded(child: _buildStatCard("Sleep", "${sleepHours.toStringAsFixed(1)}h", "/ ${sleepGoal.toStringAsFixed(1)}h", Icons.bedtime, Colors.indigoAccent, sleepProgress)),
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    "Fuel",
+                    "${widget.calories}",
+                    "/ ${widget.caloriesGoal} Kcal",
+                    Icons.local_fire_department,
+                    Colors.redAccent,
+                    fuelProgress,
+                    null,
+                  ),
+                ),
                 const SizedBox(width: 15),
-                Expanded(child: _buildStreakCard("Streak", "$streakDays", "Weekly Target: 6", Icons.local_fire_department, _orangeAccent)),
+                Expanded(
+                  child: _buildWorkoutCard(
+                    context,
+                    "Workout",
+                    widget.workoutName,
+                    widget.isWorkoutDone ? "Completed" : "Not Started",
+                    Icons.fitness_center,
+                    _purpleAccent,
+                    widget.isWorkoutDone,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 15),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    context,
+                    "Sleep",
+                    "${_currentSleepHours.toStringAsFixed(1)}h",
+                    "/ ${widget.sleepGoal.toStringAsFixed(1)}h",
+                    Icons.bedtime,
+                    Colors.indigoAccent,
+                    sleepProgress,
+                    _showSleepDialog,
+                    actionIcon: Icons.add_circle,
+                  ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: _buildStreakCard(
+                    context,
+                    "Streak",
+                    "${widget.streakDays}",
+                    "Weekly Target: 6",
+                    Icons.local_fire_department,
+                    _orangeAccent,
+                  ),
+                ),
               ],
             ),
           ],
@@ -94,40 +336,119 @@ class ActivityDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(String title, String mainValue, String subValue, IconData icon, Color color, double progress) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: _cardDark, borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 8),
-              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 15),
-          Text(mainValue, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-          Text(subValue, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(5),
-            child: LinearProgressIndicator(value: progress, backgroundColor: Colors.white10, color: color, minHeight: 6),
-          ),
-        ],
+  Widget _buildStatCard(
+    BuildContext context,
+    String title,
+    String mainValue,
+    String subValue,
+    IconData icon,
+    Color color,
+    double progress,
+    VoidCallback? onTap, {
+    IconData? actionIcon,
+  }) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color cardColor = Theme.of(context).cardColor;
+    Color textColor = isDark ? Colors.white : Colors.black;
+    Color subTextColor = isDark ? Colors.grey : Colors.black54;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: isDark
+              ? []
+              : [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    spreadRadius: 1,
+                    blurRadius: 5,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                if (actionIcon != null)
+                  Icon(actionIcon, color: color, size: 20),
+              ],
+            ),
+            const SizedBox(height: 15),
+            Text(
+              mainValue,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(subValue, style: TextStyle(color: subTextColor, fontSize: 12)),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: isDark ? Colors.white10 : Colors.grey.shade200,
+                color: color,
+                minHeight: 6,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildWorkoutCard(String title, String mainValue, String subValue, IconData icon, Color color, bool isDone) {
+  Widget _buildWorkoutCard(
+    BuildContext context,
+    String title,
+    String mainValue,
+    String subValue,
+    IconData icon,
+    Color color,
+    bool isDone,
+  ) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color cardColor = Theme.of(context).cardColor;
+    Color textColor = isDark ? Colors.white : Colors.black;
+    Color subTextColor = isDark ? Colors.grey : Colors.black54;
+
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: isDone ? _neonGreen.withOpacity(0.1) : _cardDark, 
+        color: isDone ? _neonGreen.withOpacity(0.1) : cardColor,
         borderRadius: BorderRadius.circular(20),
         border: isDone ? Border.all(color: _neonGreen.withOpacity(0.5)) : null,
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  spreadRadius: 1,
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,28 +457,78 @@ class ActivityDetailsScreen extends StatelessWidget {
             children: [
               Icon(icon, color: isDone ? _neonGreen : color, size: 20),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text(
+                title,
+                style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           const SizedBox(height: 15),
-          Text(isDone ? "Crushed It!" : mainValue, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-          Text(subValue, style: TextStyle(color: isDone ? _neonGreen : Colors.grey, fontSize: 12)),
+          Text(
+            isDone ? "Crushed It!" : mainValue,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            subValue,
+            style: TextStyle(
+              color: isDone ? _neonGreen : subTextColor,
+              fontSize: 12,
+            ),
+          ),
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 5),
-            decoration: BoxDecoration(color: isDone ? _neonGreen : Colors.white10, borderRadius: BorderRadius.circular(5)),
-            child: Icon(isDone ? Icons.check : Icons.play_arrow, color: isDone ? Colors.black : Colors.white, size: 16),
-          )
+            decoration: BoxDecoration(
+              color: isDone
+                  ? _neonGreen
+                  : (isDark ? Colors.white10 : Colors.black12),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Icon(
+              isDone ? Icons.check : Icons.play_arrow,
+              color: isDone ? Colors.black : textColor,
+              size: 16,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildStreakCard(String title, String days, String subValue, IconData icon, Color color) {
+  Widget _buildStreakCard(
+    BuildContext context,
+    String title,
+    String days,
+    String subValue,
+    IconData icon,
+    Color color,
+  ) {
+    bool isDark = Theme.of(context).brightness == Brightness.dark;
+    Color cardColor = Theme.of(context).cardColor;
+    Color textColor = isDark ? Colors.white : Colors.black;
+
     return Container(
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: _cardDark, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  spreadRadius: 1,
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -165,21 +536,38 @@ class ActivityDetailsScreen extends StatelessWidget {
             children: [
               Icon(icon, color: color, size: 20),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text(
+                title,
+                style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
           const SizedBox(height: 15),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(days, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+              Text(
+                days,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const Padding(
                 padding: EdgeInsets.only(bottom: 6.0, left: 4.0),
                 child: Text("🔥", style: TextStyle(fontSize: 16)),
               ),
             ],
           ),
-          Text(subValue, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(
+            subValue,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );

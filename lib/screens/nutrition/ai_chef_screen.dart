@@ -1,9 +1,7 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:intl/intl.dart';
 
 class AiChefScreen extends StatefulWidget {
   const AiChefScreen({super.key});
@@ -13,40 +11,92 @@ class AiChefScreen extends StatefulWidget {
 }
 
 class _AiChefScreenState extends State<AiChefScreen> {
+  final _supabase = Supabase.instance.client;
   final TextEditingController _ingredientsController = TextEditingController();
-  bool _isGenerating = false;
+
+  final String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
+
+  bool _isLoading = false;
   Map<String, dynamic>? _generatedRecipe;
 
-  // ✅ YOUR WORKING KEY
-  final String _apiKey = 'AIzaSyCXF7tJQT9wjqXMhg2o1ZzONDP4ZxhjblA';
+  int _targetCalories = 2000;
+  int _targetProtein = 150;
 
-  final Color _bgBlack = const Color(0xFF0F0F10);
-  final Color _cardDark = const Color(0xFF1C1C1E);
-  final Color _neonBlue = const Color(0xFF2F80ED);
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+  Color get _dividerColor => isDark ? Colors.white10 : Colors.black12;
 
-  // ✅ FREE TIER LATEST MODEL
+  final Color _calBlue = const Color(0xFF2F80ED);
+  final Color _protPurple = const Color(0xFFBB86FC);
+  final Color _fatRed = const Color(0xFFFF5252);
+  final Color _carbGreen = const Color(0xFFD0FD3E);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserMacros();
+  }
+
+  Future<void> _loadUserMacros() async {
+    final user = _supabase.auth.currentUser;
+    if (user != null) {
+      try {
+        final response = await _supabase
+            .from('goals')
+            .select('calories_goal, protein_goal')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        if (response != null && mounted) {
+          setState(() {
+            _targetCalories =
+                (response['calories_goal'] as num?)?.toInt() ?? 2000;
+            _targetProtein = (response['protein_goal'] as num?)?.toInt() ?? 150;
+          });
+        }
+      } catch (e) {
+        debugPrint("Error loading macros: $e");
+      }
+    }
+  }
+
   Future<void> _generateRecipe() async {
-    if (_ingredientsController.text.isEmpty) return;
-    setState(() => _isGenerating = true);
+    if (_ingredientsController.text.trim().isEmpty) return;
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isLoading = true;
+      _generatedRecipe = null;
+    });
 
     try {
-      // strictly using the winning model
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
         apiKey: _apiKey,
       );
       final prompt =
           '''
+        Act as an elite sports nutritionist and master chef.
+        My daily macro targets are roughly $_targetCalories calories and $_targetProtein g of protein.
         I have these ingredients: ${_ingredientsController.text}.
-        Suggest a high-protein meal recipe using them.
-        Strictly return a JSON object with this structure (no markdown):
+
+        Create ONE single, highly delicious recipe using some or all of these ingredients. You can assume I have basic pantry staples.
+        The recipe MUST align with a high-protein fitness lifestyle.
+
+        Return ONLY a valid JSON object formatted exactly like this. No markdown blocks.
         {
-          "title": "Recipe Name",
-          "calories": 500,
-          "protein": 30,
-          "carbs": 40,
-          "fats": 15,
-          "instructions": "Step 1... Step 2..."
+          "title": "Name of the Recipe",
+          "description": "1 sentence describing the dish.",
+          "calories": 450,
+          "protein": 40,
+          "carbs": 35,
+          "fat": 15,
+          "prep_time": "15 mins",
+          "ingredients": ["Ingredient 1", "Ingredient 2"],
+          "instructions": ["Step 1", "Step 2"]
         }
       ''';
 
@@ -57,52 +107,33 @@ class _AiChefScreenState extends State<AiChefScreen> {
             .replaceAll('```json', '')
             .replaceAll('```', '')
             .trim();
-        Map<String, dynamic> data = jsonDecode(cleanJson);
+        final int startIndex = cleanJson.indexOf('{');
+        final int endIndex = cleanJson.lastIndexOf('}');
 
-        setState(() {
-          _generatedRecipe = data;
-        });
+        if (startIndex != -1 && endIndex != -1) {
+          cleanJson = cleanJson.substring(startIndex, endIndex + 1);
+        }
+
+        final recipeData = jsonDecode(cleanJson);
+
+        if (mounted) {
+          setState(() {
+            _generatedRecipe = recipeData;
+            _isLoading = false;
+          });
+        }
       }
     } catch (e) {
-      print("Model failed: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("AI Error: Could not generate recipe. Try again."),
-        ),
-      );
-    } finally {
-      setState(() => _isGenerating = false);
-    }
-  }
-
-  Future<void> _logMeal() async {
-    if (_generatedRecipe == null) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('nutrition_logs')
-        .doc(today)
-        .collection('meals')
-        .add({
-          "foodName": _generatedRecipe!['title'],
-          "calories": _generatedRecipe!['calories'],
-          "protein": _generatedRecipe!['protein'],
-          "carbs": _generatedRecipe!['carbs'],
-          "fats": _generatedRecipe!['fats'],
-          "timestamp": FieldValue.serverTimestamp(),
-          "source": "AI Chef",
-        });
-
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Recipe Logged!")));
+      debugPrint("AI Chef Error: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not generate recipe. Please try again.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
@@ -111,144 +142,296 @@ class _AiChefScreenState extends State<AiChefScreen> {
     return Scaffold(
       backgroundColor: _bgBlack,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: const Text(
+        backgroundColor: _bgBlack,
+        elevation: 0,
+        centerTitle: true,
+        title: Text(
           "AI Kitchen Coach",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: _textWhite,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
+          icon: Icon(Icons.close, color: _textWhite, size: 24),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "What's in your fridge?",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              "Enter ingredients (e.g. Chicken, Rice, Peppers)",
-              style: TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _ingredientsController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: _cardDark,
-                hintText: "Type ingredients...",
-                hintStyle: TextStyle(color: Colors.grey.withOpacity(0.5)),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide.none,
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _cardDark,
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(30),
+                  bottomRight: Radius.circular(30),
                 ),
+                border: Border(bottom: BorderSide(color: _dividerColor)),
               ),
-            ),
-            const SizedBox(height: 30),
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton(
-                onPressed: _isGenerating ? null : _generateRecipe,
-                style: ElevatedButton.styleFrom(backgroundColor: _neonBlue),
-                child: _isGenerating
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        "GENERATE MEAL",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-              ),
-            ),
-            if (_generatedRecipe != null) ...[
-              const SizedBox(height: 40),
-              _buildRecipeCard(),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: OutlinedButton(
-                  onPressed: _logMeal,
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: _neonBlue),
-                  ),
-                  child: const Text(
-                    "COOK & LOG THIS MEAL",
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "What's in your fridge?",
                     style: TextStyle(
-                      color: Colors.white,
+                      color: _textWhite,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: _ingredientsController,
+                    style: TextStyle(color: _textWhite),
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText:
+                          "Enter ingredients (e.g. Chicken, Rice, Peppers)",
+                      hintStyle: TextStyle(color: _textGrey, fontSize: 14),
+                      filled: true,
+                      fillColor: isDark
+                          ? Colors.white.withOpacity(0.05)
+                          : Colors.black.withOpacity(0.05),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _generateRecipe,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _calBlue,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              "GENERATE MEAL",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+            Expanded(
+              child: _isLoading
+                  ? _buildLoadingState()
+                  : _generatedRecipe != null
+                  ? _buildRecipeResult()
+                  : const SizedBox.shrink(),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildRecipeCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _cardDark,
-        borderRadius: BorderRadius.circular(20),
-      ),
+  Widget _buildLoadingState() {
+    return Center(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            _generatedRecipe!['title'],
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _stat("Cals", "${_generatedRecipe!['calories']}"),
-              _stat("Prot", "${_generatedRecipe!['protein']}g"),
-              _stat("Carb", "${_generatedRecipe!['carbs']}g"),
-              _stat("Fat", "${_generatedRecipe!['fats']}g"),
-            ],
-          ),
-          const Divider(color: Colors.white12, height: 30),
-          Text(
-            _generatedRecipe!['instructions'],
-            style: const TextStyle(color: Colors.grey, height: 1.5),
-          ),
+          CircularProgressIndicator(color: _calBlue),
+          const SizedBox(height: 20),
+          Text("Chef is cooking...", style: TextStyle(color: _textGrey)),
         ],
       ),
     );
   }
 
-  Widget _stat(String label, String val) {
+  Widget _buildRecipeResult() {
+    final recipe = _generatedRecipe!;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            recipe['title'] ?? "Custom Recipe",
+            style: TextStyle(
+              color: _textWhite,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            recipe['description'] ?? "",
+            style: TextStyle(color: _textGrey, fontSize: 14, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Icon(Icons.timer_outlined, color: _textGrey, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                "Prep Time: ${recipe['prep_time'] ?? '20 mins'}",
+                style: TextStyle(
+                  color: _textWhite,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 25),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildMacroBadge(
+                "Calories",
+                "${recipe['calories']} kcal",
+                _calBlue,
+              ),
+              _buildMacroBadge("Protein", "${recipe['protein']}g", _protPurple),
+              _buildMacroBadge("Carbs", "${recipe['carbs']}g", _carbGreen),
+              _buildMacroBadge("Fat", "${recipe['fat']}g", _fatRed),
+            ],
+          ),
+          const SizedBox(height: 30),
+          Text(
+            "Ingredients",
+            style: TextStyle(
+              color: _textWhite,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: _cardDark,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: _dividerColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List.generate((recipe['ingredients'] as List).length, (
+                index,
+              ) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "• ",
+                        style: TextStyle(
+                          color: _calBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          recipe['ingredients'][index].toString(),
+                          style: TextStyle(color: _textWhite, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 25),
+          Text(
+            "Instructions",
+            style: TextStyle(
+              color: _textWhite,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: List.generate((recipe['instructions'] as List).length, (
+              index,
+            ) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 15),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 24,
+                      width: 24,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _calBlue.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        "${index + 1}",
+                        style: TextStyle(
+                          color: _calBlue,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Text(
+                        recipe['instructions'][index].toString(),
+                        style: TextStyle(color: _textWhite, height: 1.5),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMacroBadge(String label, String value, Color color) {
     return Column(
       children: [
-        Text(
-          val,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            shape: BoxShape.circle,
+            border: Border.all(color: color.withOpacity(0.5)),
+          ),
+          child: Text(
+            value.replaceAll(RegExp(r'[^0-9]'), ''),
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
           ),
         ),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        const SizedBox(height: 8),
+        Text(label, style: TextStyle(color: _textGrey, fontSize: 12)),
       ],
     );
   }

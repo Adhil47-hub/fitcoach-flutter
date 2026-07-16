@@ -14,7 +14,7 @@ class Welcomescreen1 extends StatefulWidget {
 
 class _Welcomescreen1State extends State<Welcomescreen1> {
   final PageController _controller = PageController();
-  int current_page = 0;
+  int currentPage = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +29,7 @@ class _Welcomescreen1State extends State<Welcomescreen1> {
             controller: _controller,
             itemCount: welcomescreen_data.length,
             onPageChanged: (index) {
-              setState(() => current_page = index);
+              setState(() => currentPage = index);
             },
             itemBuilder: (context, index) {
               return Stack(
@@ -87,10 +87,10 @@ class _Welcomescreen1State extends State<Welcomescreen1> {
                   transitionBuilder: (child, animation) =>
                       FadeTransition(opacity: animation, child: child),
                   child: Column(
-                    key: ValueKey<int>(current_page),
+                    key: ValueKey<int>(currentPage),
                     children: [
                       Icon(
-                        welcomescreen_data[current_page].icon,
+                        welcomescreen_data[currentPage].icon,
                         color: const Color(0xFFE8FF4F),
                         size: 55,
                       ),
@@ -98,7 +98,7 @@ class _Welcomescreen1State extends State<Welcomescreen1> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Text(
-                          welcomescreen_data[current_page].title,
+                          welcomescreen_data[currentPage].title,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 24,
@@ -142,7 +142,7 @@ class _Welcomescreen1State extends State<Welcomescreen1> {
                       elevation: 0,
                     ),
                     onPressed: () {
-                      if (current_page == welcomescreen_data.length - 1) {
+                      if (currentPage == welcomescreen_data.length - 1) {
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
@@ -157,7 +157,7 @@ class _Welcomescreen1State extends State<Welcomescreen1> {
                       }
                     },
                     child: Text(
-                      welcomescreen_data[current_page].button_text,
+                      welcomescreen_data[currentPage].button_text,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,

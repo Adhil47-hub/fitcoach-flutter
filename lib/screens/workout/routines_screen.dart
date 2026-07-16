@@ -1,8 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fitcoach_/screens/workout/ai_generate_screen.dart';
 import 'package:fitcoach_/screens/workout/create_routine_screen.dart';
-import 'package:fitcoach_/screens/workout/routine_detail_screen.dart'; // ✅ Added Import
+import 'package:fitcoach_/screens/workout/routine_detail_screen.dart';
 import 'package:flutter/material.dart';
 
 class RoutinesScreen extends StatefulWidget {
@@ -13,29 +12,33 @@ class RoutinesScreen extends StatefulWidget {
 }
 
 class _RoutinesScreenState extends State<RoutinesScreen> {
-  final Color _bgBlack = const Color(0xFF0F0F10);
-  final Color _cardDark = const Color(0xFF1C1C1E);
+  final _supabase = Supabase.instance.client;
+
+  bool get isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardDark => Theme.of(context).cardColor;
+  Color get _textWhite => isDark ? Colors.white : Colors.black;
+  Color get _textGrey => isDark ? Colors.grey : Colors.black54;
+
   final Color _neonBlue = const Color(0xFF2F80ED);
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabase.auth.currentUser;
 
     return Scaffold(
       backgroundColor: _bgBlack,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        title: const Text(
+        elevation: 0,
+        iconTheme: IconThemeData(color: _textWhite),
+        title: Text(
           "My Routines",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          style: TextStyle(color: _textWhite, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.white),
+            icon: Icon(Icons.add, color: _textWhite),
             onPressed: () {
               Navigator.push(
                 context,
@@ -45,28 +48,42 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .doc(user?.uid)
-            .collection('routines')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _supabase
+            .from('routines')
+            .stream(primaryKey: ['id'])
+            .eq('user_id', user?.id ?? ''),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  "Database Error: Your daily Supabase free tier limit might have been reached, or permissions are blocked.\n\nError details: ${snapshot.error}",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 16),
+                ),
+              ),
+            );
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator(color: _neonBlue));
+          }
+
+          final List<Map<String, dynamic>> routines = snapshot.data ?? [];
+
+          routines.sort((a, b) => b['createdAt'].compareTo(a['createdAt']));
+
+          if (routines.isEmpty) {
             return _buildEmptyState();
           }
 
           return ListView.builder(
             padding: const EdgeInsets.all(20),
-            itemCount: snapshot.data!.docs.length,
+            itemCount: routines.length,
             itemBuilder: (context, index) {
-              var doc = snapshot.data!.docs[index];
-              return _buildRoutineCard(doc);
+              return _buildRoutineCard(routines[index]);
             },
           );
         },
@@ -79,22 +96,25 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.fitness_center, size: 60, color: Colors.grey[800]),
+          Icon(
+            Icons.fitness_center,
+            size: 60,
+            color: isDark ? Colors.grey[800] : Colors.grey[300],
+          ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             "No Routines Yet",
             style: TextStyle(
-              color: Colors.white,
+              color: _textWhite,
               fontSize: 22,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const Text(
+          Text(
             "Create a plan to get started.",
-            style: TextStyle(color: Colors.grey),
+            style: TextStyle(color: _textGrey),
           ),
           const SizedBox(height: 30),
-
           ElevatedButton.icon(
             onPressed: () {
               Navigator.push(
@@ -103,7 +123,13 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
               );
             },
             icon: const Icon(Icons.auto_awesome, color: Colors.white),
-            label: const Text("Generate with AI"),
+            label: const Text(
+              "Generate with AI",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _neonBlue,
               shape: RoundedRectangleBorder(
@@ -117,20 +143,19 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     );
   }
 
-  Widget _buildRoutineCard(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+  Widget _buildRoutineCard(Map<String, dynamic> data) {
     String title = data['title'] ?? "Workout";
     String day = data['day'] ?? "Unscheduled";
     List exercises = data['exercises'] ?? [];
+    String routineId = data['id'].toString();
 
-    // ✅ Wrapped in GestureDetector to make it clickable
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => RoutineDetailScreen(
-              routineId: doc.id,
+              routineId: routineId,
               routineTitle: title,
               routineData: data,
             ),
@@ -143,7 +168,17 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
         decoration: BoxDecoration(
           color: _cardDark,
           borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+          boxShadow: isDark
+              ? []
+              : [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.15),
+                    spreadRadius: 1,
+                    blurRadius: 5,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -154,8 +189,8 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: _textWhite,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -169,21 +204,17 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                 ],
               ),
             ),
-            // Schedule / Delete Menu
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.grey),
+              icon: Icon(Icons.more_vert, color: _textGrey),
               color: _cardDark,
               onSelected: (value) {
-                if (value == 'schedule') _showScheduleDialog(doc.id, day);
-                if (value == 'delete') _deleteWorkout(doc.id);
+                if (value == 'schedule') _showScheduleDialog(routineId, day);
+                if (value == 'delete') _deleteWorkout(routineId);
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'schedule',
-                  child: Text(
-                    "Schedule",
-                    style: TextStyle(color: Colors.white),
-                  ),
+                  child: Text("Schedule", style: TextStyle(color: _textWhite)),
                 ),
                 const PopupMenuItem(
                   value: 'delete',
@@ -200,8 +231,7 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     );
   }
 
-  // --- SCHEDULE ROUTINE ---
-  void _showScheduleDialog(String docId, String currentDay) {
+  void _showScheduleDialog(String routineId, String currentDay) {
     showModalBottomSheet(
       context: context,
       backgroundColor: _cardDark,
@@ -224,10 +254,10 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+              Text(
                 "Schedule Routine",
                 style: TextStyle(
-                  color: Colors.white,
+                  color: _textWhite,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -242,21 +272,17 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                           title: Text(
                             day,
                             style: TextStyle(
-                              color: day == currentDay
-                                  ? Colors.grey
-                                  : Colors.white,
+                              color: day == currentDay ? _textGrey : _textWhite,
                             ),
                           ),
                           trailing: day == currentDay
-                              ? const Icon(Icons.check, color: Colors.grey)
+                              ? Icon(Icons.check, color: _textGrey)
                               : null,
                           onTap: () async {
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(FirebaseAuth.instance.currentUser!.uid)
-                                .collection('routines')
-                                .doc(docId)
-                                .update({'day': day});
+                            await _supabase
+                                .from('routines')
+                                .update({'day': day})
+                                .eq('id', routineId);
 
                             if (mounted) {
                               Navigator.pop(context);
@@ -284,25 +310,21 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     );
   }
 
-  // --- DELETE ROUTINE ---
-  void _deleteWorkout(String docId) async {
+  void _deleteWorkout(String routineId) async {
     bool confirm =
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: _cardDark,
-            title: const Text(
-              "Delete Routine?",
-              style: TextStyle(color: Colors.white),
-            ),
-            content: const Text(
+            title: Text("Delete Routine?", style: TextStyle(color: _textWhite)),
+            content: Text(
               "This cannot be undone.",
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: _textGrey),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
+                child: Text("Cancel", style: TextStyle(color: _textGrey)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
@@ -317,12 +339,7 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
         false;
 
     if (confirm) {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser!.uid)
-          .collection('routines')
-          .doc(docId)
-          .delete();
+      await _supabase.from('routines').delete().eq('id', routineId);
     }
   }
 }

@@ -10,7 +10,6 @@ class StretchingTimerScreen extends StatefulWidget {
 }
 
 class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
-  // Dummy stretching list (AI would generate this in the future)
   final List<Map<String, dynamic>> _stretches = [
     {"name": "Cross-Body Shoulder Stretch", "duration": 30},
     {"name": "Overhead Triceps Stretch", "duration": 30},
@@ -57,7 +56,10 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
       // Finished Routine!
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("🎉 Recovery Routine Completed!"), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text("🎉 Recovery Routine Completed!"),
+          backgroundColor: Colors.green,
+        ),
       );
     }
   }
@@ -79,7 +81,10 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(widget.routineName, style: const TextStyle(color: Colors.white)),
+        title: Text(
+          widget.routineName,
+          style: const TextStyle(color: Colors.white),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -96,11 +101,15 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
             const SizedBox(height: 10),
             Text(
               currentName,
-              style: const TextStyle(color: Colors.blueAccent, fontSize: 24, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: Colors.blueAccent,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 50),
-            
+
             // --- HUGE CIRCULAR TIMER ---
             Stack(
               alignment: Alignment.center,
@@ -117,14 +126,16 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
                 ),
                 Text(
                   "00:${_timeLeft.toString().padLeft(2, '0')}",
-                  style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 50,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 60),
-            
-            // --- CONTROLS ---
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -133,8 +144,15 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
                   child: Container(
                     height: 80,
                     width: 80,
-                    decoration: const BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle),
-                    child: Icon(_isRunning ? Icons.pause : Icons.play_arrow, color: Colors.black, size: 40),
+                    decoration: const BoxDecoration(
+                      color: Colors.blueAccent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _isRunning ? Icons.pause : Icons.play_arrow,
+                      color: Colors.black,
+                      size: 40,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 30),
@@ -143,12 +161,19 @@ class _StretchingTimerScreenState extends State<StretchingTimerScreen> {
                   child: Container(
                     height: 60,
                     width: 60,
-                    decoration: BoxDecoration(color: Colors.grey.shade800, shape: BoxShape.circle),
-                    child: const Icon(Icons.skip_next, color: Colors.white, size: 30),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade800,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.skip_next,
+                      color: Colors.white,
+                      size: 30,
+                    ),
                   ),
                 ),
               ],
-            )
+            ),
           ],
         ),
       ),

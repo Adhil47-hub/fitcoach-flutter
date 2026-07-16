@@ -1,21 +1,21 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  // --- THIS WAS MISSING. ADD IT HERE. ---
   Future<bool> isProfileComplete(String uid) async {
     try {
-      DocumentSnapshot userDoc = await _db.collection('users').doc(uid).get();
+      final data = await _supabase
+          .from('users')
+          .select('profileComplete')
+          .eq('id', uid)
+          .maybeSingle();
 
-      if (userDoc.exists && userDoc.data() != null) {
-        final data = userDoc.data() as Map<String, dynamic>;
+      if (data != null) {
         return data['profileComplete'] ?? false;
       }
     } catch (e) {
@@ -23,64 +23,21 @@ class AuthService {
     }
     return false;
   }
-  // --------------------------------------
 
-  // Sign in with Facebook only
-  Future<UserCredential> signInWithFacebook() async {
-    final LoginResult result = await FacebookAuth.instance.login(
-      permissions: ['email', 'public_profile'],
-    );
-
-    if (result.status == LoginStatus.cancelled) {
-      throw FirebaseAuthException(
-        code: 'ABORTED_BY_USER',
-        message: 'Facebook sign-in cancelled',
+  Future<void> signInWithGoogle() async {
+    try {
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb ? null : 'com.adhil.fitcoach://login-callback',
+        authScreenLaunchMode: LaunchMode.externalApplication,
       );
+    } catch (e) {
+      print('Google Web OAuth Error: $e');
+      rethrow;
     }
-
-    if (result.status != LoginStatus.success || result.accessToken == null) {
-      throw FirebaseAuthException(
-        code: 'FACEBOOK_LOGIN_FAILED',
-        message: 'Facebook login failed',
-      );
-    }
-
-    final accessToken = result.accessToken!;
-    final String token =
-        (accessToken as dynamic).token ??
-        (accessToken as dynamic).tokenString ??
-        '';
-
-    if (token.isEmpty) {
-      throw FirebaseAuthException(
-        code: 'MISSING_ACCESS_TOKEN',
-        message: 'Facebook access token missing',
-      );
-    }
-
-    final credential = FacebookAuthProvider.credential(token);
-    final userCred = await _auth.signInWithCredential(credential);
-
-    final user = userCred.user;
-    if (user != null) {
-      await _db.collection('users').doc(user.uid).set({
-        'uid': user.uid,
-        'email': user.email,
-        'displayName': user.displayName,
-        'photoURL': user.photoURL,
-        'loginProvider': 'facebook',
-        'lastSignIn': FieldValue.serverTimestamp(),
-        // Don't overwrite profileComplete if it exists
-      }, SetOptions(merge: true));
-    }
-
-    return userCred;
   }
 
   Future<void> signOut() async {
-    try {
-      await FacebookAuth.instance.logOut();
-    } catch (_) {}
-    await _auth.signOut();
+    await _supabase.auth.signOut();
   }
 }

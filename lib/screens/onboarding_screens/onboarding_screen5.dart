@@ -1,4 +1,4 @@
-import 'package:fitcoach_/screens/onboarding_screens/onboarding_screen6.dart';
+import 'package:fitcoach_/screens/onboarding_screens/onboarding_screen6.dart'; // ✅ Updated to point to new Screen 6
 import 'package:flutter/material.dart';
 
 class OnboardingScreen5 extends StatefulWidget {
@@ -39,7 +39,7 @@ class _OnboardingScreen5State extends State<OnboardingScreen5> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          "Step 5 of 6",
+          "Step 5 of 7",
           style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
         ),
         centerTitle: true,
@@ -115,10 +115,8 @@ class _OnboardingScreen5State extends State<OnboardingScreen5> {
                         ),
                       ),
 
-                      // Push the button to the bottom
                       const Spacer(),
 
-                      // --- CONTINUE BUTTON ---
                       Padding(
                         padding: const EdgeInsets.fromLTRB(30, 20, 30, 20),
                         child: SizedBox(

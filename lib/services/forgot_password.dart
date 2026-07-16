@@ -1,5 +1,5 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ForgotPassword extends StatefulWidget {
   const ForgotPassword({super.key});
@@ -10,7 +10,7 @@ class ForgotPassword extends StatefulWidget {
 
 class _ForgotPasswordState extends State<ForgotPassword> {
   final _emailController = TextEditingController();
-  final _auth = FirebaseAuth.instance;
+  final _supabase = Supabase.instance.client;
   bool _isLoading = false;
 
   @override
@@ -21,9 +21,9 @@ class _ForgotPasswordState extends State<ForgotPassword> {
 
   void _showSnack(String message, {Color? bg}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: bg),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message), backgroundColor: bg));
   }
 
   Future<void> _resetPassword() async {
@@ -36,12 +36,15 @@ class _ForgotPasswordState extends State<ForgotPassword> {
     setState(() => _isLoading = true);
 
     try {
-      // Send password reset email
-      await _auth.sendPasswordResetEmail(email: email);
+      await _supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'io.supabase.fitcoach://reset-password',
+      );
+
       _showSnack('Password reset email sent! Check your inbox.');
-      if (mounted) Navigator.pop(context); // Go back to login
-    } on FirebaseAuthException catch (e) {
-      _showSnack(e.message ?? 'Error sending email', bg: Colors.red);
+      if (mounted) Navigator.pop(context);
+    } on AuthException catch (e) {
+      _showSnack(e.message, bg: Colors.red);
     } catch (e) {
       _showSnack('Error: $e', bg: Colors.red);
     } finally {
@@ -81,7 +84,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Colors.black), // Text color
+              style: const TextStyle(color: Colors.black),
               decoration: InputDecoration(
                 hintText: "Enter your email",
                 hintStyle: const TextStyle(color: Colors.grey),
@@ -91,8 +94,10 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                   borderRadius: BorderRadius.circular(15),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
             ),
             const SizedBox(height: 30),
@@ -101,7 +106,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _resetPassword,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE8FF4F), // Neon Lime
+                  backgroundColor: const Color(0xFFE8FF4F),
                   foregroundColor: Colors.black,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30),
@@ -112,7 +117,9 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                     : const Text(
                         "Send Reset Link",
                         style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
               ),
             ),

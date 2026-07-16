@@ -1,6 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fitcoach_/screens/homescreen.dart';
+import 'package:fitcoach_/screens/onboarding_screens/onboarding_screen7.dart';
 import 'package:flutter/material.dart';
 
 class OnboardingScreen6 extends StatefulWidget {
@@ -13,60 +11,31 @@ class OnboardingScreen6 extends StatefulWidget {
 }
 
 class _OnboardingScreen6State extends State<OnboardingScreen6> {
-  String? _selectedGoal;
-  bool _isLoading = false;
+  String? _selectedDiet;
+  String? _selectedCuisine;
+
+  final TextEditingController _notesController = TextEditingController();
 
   Color get neonLime => const Color(0xFFE8FF4F);
+  Color get purpleBox => const Color(0xFFB19FF4);
 
-  // --- SAVE LOGIC ---
-  Future<void> _finishOnboarding() async {
-    setState(() => _isLoading = true);
+  @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
+  }
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("No user logged in!")));
-        return;
-      }
+  void _continueToNextScreen() {
+    widget.userData['dietary_pattern'] = _selectedDiet;
+    widget.userData['cuisine'] = _selectedCuisine;
+    widget.userData['dietary_notes'] = _notesController.text.trim();
 
-      // 1. Add final data points
-      widget.userData['goal'] = _selectedGoal;
-      widget.userData['profileComplete'] = true; // MARK PROFILE AS COMPLETE
-
-      // Optional: Add timestamp if not present
-      if (!widget.userData.containsKey('createdAt')) {
-        widget.userData['updatedAt'] = FieldValue.serverTimestamp();
-      }
-
-      // 2. Save to Firestore (Merge to avoid deleting email/uid)
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(widget.userData, SetOptions(merge: true));
-      print("✅ SUCCESS! Data saved to Firebase: ${widget.userData}");
-
-      // 3. Navigate to Home (Clear back stack so they can't go back to onboarding)
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const Homescreen()),
-          (route) => false, // This removes all previous routes
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Error saving data: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => OnboardingScreen7(userData: widget.userData),
+      ),
+    );
   }
 
   @override
@@ -81,23 +50,20 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          "Step 6 of 6",
+          "Step 6 of 7",
           style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
         ),
         centerTitle: true,
       ),
       body: SafeArea(
-        // CHANGE 1: Removed the outer Padding widget here
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 10),
-
-            // CHANGE 2: Added Padding specifically for the Title
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: Text(
-                "What Is Your Goal?",
+                "Dietary Preferences",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -106,16 +72,13 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
                 ),
               ),
             ),
-
-            const SizedBox(height: 30),
-
-            // CHANGE 3: The Container has NO external padding (touches edges)
+            const SizedBox(height: 25),
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-              color: const Color(0xFFB19FF4),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              color: purpleBox,
               child: const Center(
                 child: Text(
-                  "Select your primary goal so we can tailor your workout and nutrition plan.",
+                  "This helps our AI Coach suggest accurate food swaps and personalized meal ideas based on your lifestyle.",
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 14,
@@ -126,37 +89,91 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
               ),
             ),
 
-            const SizedBox(height: 30),
-
-            // --- GOAL CARDS ---
             Expanded(
               child: SingleChildScrollView(
-                // CHANGE 4: Added Padding inside scroll view for the cards
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.all(20),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildGoalCard(
-                      "Lose Weight",
-                      "Burn fat & get lean",
-                      Icons.local_fire_department,
+                    const Text(
+                      "Dietary Pattern",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(height: 15),
-                    _buildGoalCard(
-                      "Build Muscle",
-                      "Gain mass & strength",
-                      Icons.fitness_center,
+                    const SizedBox(height: 12),
+                    _buildSelectionGroup(
+                      options: [
+                        "Standard (No Restrictions)",
+                        "Vegetarian",
+                        "Vegan",
+                        "Pescetarian",
+                        "Keto / Low Carb",
+                      ],
+                      selectedValue: _selectedDiet,
+                      onSelected: (val) => setState(() => _selectedDiet = val),
                     ),
-                    const SizedBox(height: 15),
-                    _buildGoalCard(
-                      "Keep Fit",
-                      "Maintain weight & tone",
-                      Icons.favorite,
+
+                    const SizedBox(height: 30),
+
+                    const Text(
+                      "Primary Cuisine",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(height: 15),
-                    _buildGoalCard(
-                      "Gain Weight",
-                      "Healthy bulking",
-                      Icons.monitor_weight,
+                    const SizedBox(height: 12),
+                    _buildSelectionGroup(
+                      options: [
+                        "Global / Mixed",
+                        "Asian",
+                        "Indian",
+                        "Mediterranean",
+                        "Western",
+                        "Latin American",
+                      ],
+                      selectedValue: _selectedCuisine,
+                      onSelected: (val) =>
+                          setState(() => _selectedCuisine = val),
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    const Text(
+                      "Any specific cuisines or custom rules?",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _notesController,
+                      style: const TextStyle(color: Colors.white),
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText:
+                            "e.g., I love Arabic cuisine, I do intermittent fasting, allergic to peanuts...",
+                        hintStyle: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 14,
+                        ),
+                        filled: true,
+                        fillColor: const Color(0xFF1C1C1E),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(15),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(15),
+                          borderSide: BorderSide(color: neonLime, width: 1.5),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -164,16 +181,14 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
               ),
             ),
 
-            // --- FINISH BUTTON ---
-            // CHANGE 5: Added Padding specifically for the Button
             Padding(
-              padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
               child: SizedBox(
                 height: 55,
                 child: ElevatedButton(
-                  onPressed: (_selectedGoal == null || _isLoading)
+                  onPressed: (_selectedDiet == null || _selectedCuisine == null)
                       ? null
-                      : _finishOnboarding,
+                      : _continueToNextScreen,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: neonLime,
                     foregroundColor: Colors.black,
@@ -183,22 +198,10 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
                       borderRadius: BorderRadius.circular(30),
                     ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            color: Colors.black,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          "Finish",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  child: const Text(
+                    "Continue",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ),
@@ -208,73 +211,35 @@ class _OnboardingScreen6State extends State<OnboardingScreen6> {
     );
   }
 
-  // --- Custom Card Builder ---
-  Widget _buildGoalCard(String title, String subtitle, IconData icon) {
-    bool isSelected = _selectedGoal == title;
-
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedGoal = title;
-        });
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
-        decoration: BoxDecoration(
-          color: isSelected ? neonLime : const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(20),
-          border: isSelected ? null : Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          children: [
-            // Icon
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? Colors.black.withOpacity(0.1)
-                    : Colors.black54,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
+  Widget _buildSelectionGroup({
+    required List<String> options,
+    required String? selectedValue,
+    required ValueChanged<String> onSelected,
+  }) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: options.map((option) {
+        bool isSelected = selectedValue == option;
+        return GestureDetector(
+          onTap: () => onSelected(option),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected ? neonLime : const Color(0xFF1C1C1E),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isSelected ? neonLime : Colors.white12),
+            ),
+            child: Text(
+              option,
+              style: TextStyle(
                 color: isSelected ? Colors.black : Colors.white,
-                size: 24,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
-            const SizedBox(width: 20),
-            // Text
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isSelected ? Colors.black : Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: isSelected ? Colors.black87 : Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            // Radio Circle Indicator
-            Icon(
-              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: isSelected ? Colors.black : Colors.grey,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
