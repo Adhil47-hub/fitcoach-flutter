@@ -16,7 +16,7 @@ class AiMacroService {
     required String activityLevel,
   }) async {
     try {
-      final apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
+      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
       if (apiKey.isEmpty) throw Exception("API Key is missing!");
 
       final model = GenerativeModel(

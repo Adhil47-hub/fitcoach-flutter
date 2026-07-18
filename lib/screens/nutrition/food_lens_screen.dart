@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ Single Import
 import 'package:image_picker/image_picker.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class FoodLensScreen extends StatefulWidget {
   const FoodLensScreen({super.key});
@@ -21,7 +22,7 @@ class _FoodLensScreenState extends State<FoodLensScreen> {
   String? _error;
 
   final ImagePicker _picker = ImagePicker();
-  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
+  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   // --- ✅ DYNAMIC THEME COLORS ---
   bool get isDark => Theme.of(context).brightness == Brightness.dark;

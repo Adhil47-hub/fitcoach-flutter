@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AiGenerateScreen extends StatefulWidget {
   const AiGenerateScreen({super.key});
@@ -14,7 +15,7 @@ class AiGenerateScreen extends StatefulWidget {
 class _AiGenerateScreenState extends State<AiGenerateScreen> {
   final _supabase = Supabase.instance.client;
 
-  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
+  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   String _selectedGoal = "Build Muscle";
   String _selectedLevel = "Intermediate";
