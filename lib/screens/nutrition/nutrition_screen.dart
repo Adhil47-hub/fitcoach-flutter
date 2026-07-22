@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,7 +21,6 @@ class NutritionScreen extends StatefulWidget {
 
 class _NutritionScreenState extends State<NutritionScreen> {
   final _supabase = Supabase.instance.client;
-  final String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
 
   int _selectedIndex = 0;
 
@@ -140,7 +140,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
       final prompt =
           '''
@@ -1208,7 +1208,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
 
       String profile =

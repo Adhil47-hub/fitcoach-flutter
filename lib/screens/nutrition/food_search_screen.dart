@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:fitcoach_/screens/nutrition/food_detail_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:openfoodfacts/openfoodfacts.dart';
 
@@ -56,8 +57,6 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
   bool _isSearchingAi = false;
   bool _isSearchingDb = false;
 
-  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
-
   bool get isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _bgBlack => Theme.of(context).scaffoldBackgroundColor;
   Color get _cardDark => Theme.of(context).cardColor;
@@ -96,7 +95,7 @@ class _FoodSearchScreenState extends State<FoodSearchScreen> {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
 
       final prompt =

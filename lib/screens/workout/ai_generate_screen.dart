@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
@@ -13,8 +14,6 @@ class AiGenerateScreen extends StatefulWidget {
 
 class _AiGenerateScreenState extends State<AiGenerateScreen> {
   final _supabase = Supabase.instance.client;
-
-  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
 
   String _selectedGoal = "Build Muscle";
   String _selectedLevel = "Intermediate";
@@ -168,7 +167,7 @@ class _AiGenerateScreenState extends State<AiGenerateScreen> {
 
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
       final prompt =
           '''

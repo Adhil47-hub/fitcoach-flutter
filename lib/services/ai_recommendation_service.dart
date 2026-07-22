@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class AiRecommendationService {
-  static const String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
-
   static Future<List<Map<String, dynamic>>> getDynamicRecommendations({
     required String userName,
     required String goal,
@@ -18,7 +17,7 @@ class AiRecommendationService {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
 
       final prompt =
