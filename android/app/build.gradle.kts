@@ -47,4 +47,5 @@ flutter {
 dependencies {
     // ✅ FIXED: Updated from 2.0.4 to 2.1.4 as requested by the error message
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("com.google.android.material:material:1.11.0")
 }
