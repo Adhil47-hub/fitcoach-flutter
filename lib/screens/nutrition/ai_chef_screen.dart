@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AiChefScreen extends StatefulWidget {
   const AiChefScreen({super.key});
@@ -14,7 +15,7 @@ class _AiChefScreenState extends State<AiChefScreen> {
   final _supabase = Supabase.instance.client;
   final TextEditingController _ingredientsController = TextEditingController();
 
-  final String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
+  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   bool _isLoading = false;
   Map<String, dynamic>? _generatedRecipe;

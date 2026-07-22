@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:fitcoach_/screens/nutrition/ai_chef_screen.dart';
 import 'package:fitcoach_/screens/nutrition/food_lens_screen.dart';
@@ -20,7 +21,7 @@ class NutritionScreen extends StatefulWidget {
 
 class _NutritionScreenState extends State<NutritionScreen> {
   final _supabase = Supabase.instance.client;
-  final String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
+  final String _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   int _selectedIndex = 0;
 
