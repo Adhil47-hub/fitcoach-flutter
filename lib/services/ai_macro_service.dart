@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class AiMacroService {
@@ -16,8 +16,7 @@ class AiMacroService {
     required String activityLevel,
   }) async {
     try {
-      final apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
-      if (apiKey.isEmpty) throw Exception("API Key is missing!");
+      final apiKey = AiApiKey.value;
 
       final model = GenerativeModel(
         model: 'gemini-flash-latest',

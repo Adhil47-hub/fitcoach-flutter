@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 class AiChefScreen extends StatefulWidget {
@@ -13,8 +14,6 @@ class AiChefScreen extends StatefulWidget {
 class _AiChefScreenState extends State<AiChefScreen> {
   final _supabase = Supabase.instance.client;
   final TextEditingController _ingredientsController = TextEditingController();
-
-  final String _apiKey = 'AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c';
 
   bool _isLoading = false;
   Map<String, dynamic>? _generatedRecipe;
@@ -75,7 +74,7 @@ class _AiChefScreenState extends State<AiChefScreen> {
     try {
       final model = GenerativeModel(
         model: 'gemini-flash-latest',
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
       final prompt =
           '''

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ Single Import
+import 'package:fitcoach_/services/ai_api_key.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:intl/intl.dart';
@@ -21,7 +22,6 @@ class _FoodLensScreenState extends State<FoodLensScreen> {
   String? _error;
 
   final ImagePicker _picker = ImagePicker();
-  final String _apiKey = "AIzaSyACHwc1yYdZ5QYviaOsquCDTaaC0Kgs40c";
 
   // --- ✅ DYNAMIC THEME COLORS ---
   bool get isDark => Theme.of(context).brightness == Brightness.dark;
@@ -63,7 +63,7 @@ class _FoodLensScreenState extends State<FoodLensScreen> {
 
       final model = GenerativeModel(
         model: 'gemini-flash-latest', // ✅ Updated to latest stable model
-        apiKey: _apiKey,
+        apiKey: AiApiKey.value,
       );
       final response = await model.generateContent([
         Content.multi([prompt, imagePart]),
